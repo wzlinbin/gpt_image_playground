@@ -160,7 +160,6 @@ function createResponsesImageTool(
 
 function createResponsesInput(prompt: string, inputImageDataUrls: string[], allowPromptRewrite: boolean): unknown {
   const text = allowPromptRewrite ? prompt : `${PROMPT_REWRITE_GUARD_PREFIX}\n${prompt}`
-  if (!inputImageDataUrls.length) return text
 
   return [
     {
@@ -985,9 +984,7 @@ async function callResponsesImageApiSingle(opts: CallApiOptions, profile: ApiPro
       input: createResponsesInput(prompt, inputImageDataUrls, opts.settings.allowPromptRewrite),
       tools: [createResponsesImageTool(params, inputImageDataUrls.length > 0, profile, opts.maskDataUrl)],
       tool_choice: 'required',
-    }
-    if (profile.streamImages) {
-      body.stream = true
+      stream: true,
     }
 
     const response = await fetch(buildApiUrl(profile.baseUrl, 'responses', proxyConfig, useApiProxy), {
@@ -995,6 +992,7 @@ async function callResponsesImageApiSingle(opts: CallApiOptions, profile: ApiPro
       headers: {
         ...requestHeaders,
         'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
       },
       cache: 'no-store',
       body: JSON.stringify(body),
@@ -1003,10 +1001,10 @@ async function callResponsesImageApiSingle(opts: CallApiOptions, profile: ApiPro
 
     if (!response.ok) {
       const errorMessage = await getApiErrorMessage(response)
-      throw new Error(maybeAppendStreamingHint(errorMessage, response.status, profile.streamImages))
+      throw new Error(maybeAppendStreamingHint(errorMessage, response.status, true))
     }
 
-    if (profile.streamImages && isEventStreamResponse(response)) {
+    if (isEventStreamResponse(response)) {
       return parseResponsesApiStreamResponse(response, mime, opts.onPartialImage)
     }
 

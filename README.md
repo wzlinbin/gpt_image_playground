@@ -189,7 +189,7 @@
 
 **导入自定义服务商配置**：`VITE_DEFAULT_API_URL` 除了填写普通 API 地址外，也支持直接填写 `.json` 配置 URL 或带 `settings` 参数的分享 URL。设为配置 URL 时，页面启动后会自动导入其中的自定义服务商和 API 配置。
 
-**仅展示默认配置**：设置 `VITE_SHOW_DEFAULT_CONFIG_ONLY=true` 后，如果已配置默认 API URL 或默认代理，前端会禁用“当前配置”和“服务商类型”的下拉切换，只允许使用默认配置和默认服务商类型。通过页面 URL 参数传入的配置只会覆盖当前配置字段，不会新建配置、切换服务商类型或导入自定义服务商；`VITE_DEFAULT_API_URL` 本身仍可使用配置 URL 来定义部署端默认服务商。
+**固定默认配置**：设置 `VITE_SHOW_DEFAULT_CONFIG_ONLY=true` 后，如果已配置默认 API URL 或默认代理，前端会固定当前配置，并锁定除 API Key 外的全部 API 配置项。页面 URL 参数不能覆盖这些只读字段，API Key 仍可在浏览器本地填写。
 
 **绑定自定义域名 (国内直连)**：Vercel 默认分配的 `.vercel.app` 域名在国内通常无法直接访问。如果你希望在国内直连访问，请在 Vercel 项目的 **Settings → Domains** 中绑定你自己的域名。
 
@@ -221,25 +221,30 @@ npx wrangler login
 npm run deploy:cf
 ```
 
-部署脚本会先执行 `npm run build`，再通过 `wrangler deploy` 上传 `dist/` 目录。
+部署脚本会先执行 `npm run build`，再部署静态资源和负责运行时配置的 Worker。页面每次启动都会请求不缓存的 `/runtime-config.js`，因此修改 Worker 变量后无需重新构建前端。
 
-**配置默认 API URL**：Cloudflare Workers 的环境变量不会自动改写已经构建好的静态文件。若需预设默认 API 地址，请在构建前设置 `VITE_DEFAULT_API_URL` 后再部署。
+**配置 API 选项**：打开 Cloudflare Dashboard 中对应 Worker 的 **设置 → 变量和密钥 → 添加**，选择文本变量并逐项添加：
 
-```bash
-VITE_DEFAULT_API_URL=https://api.openai.com/v1 npm run deploy:cf
-```
+| 变量名 | 示例值 | 对应配置 |
+|---|---|---|
+| `API_CONFIG_READ_ONLY` | `true` | 是否全局只读；只读时仅 API Key 可编辑 |
+| `API_CONFIG_NAME` | `默认` | 配置名称 |
+| `API_CONFIG_PROVIDER` | `openai` | 服务商，可选 `openai` 或 `fal` |
+| `API_CONFIG_BASE_URL` | `https://api.openai.com/v1` | API URL |
+| `API_CONFIG_MODEL` | `gpt-image-2` | 模型 ID |
+| `API_CONFIG_TIMEOUT` | `600` | 请求超时，范围 10-600 秒 |
+| `API_CONFIG_MODE` | `images` | API 接口，可选 `images` 或 `responses` |
+| `API_CONFIG_CODEX_CLI` | `false` | Codex CLI 兼容模式 |
+| `API_CONFIG_API_PROXY` | `false` | API 代理 |
+| `API_CONFIG_RESPONSE_FORMAT_B64_JSON` | `false` | 返回 Base64 图片数据 |
+| `API_CONFIG_STREAM_IMAGES` | `false` | 流式传输 |
+| `API_CONFIG_STREAM_PARTIAL_IMAGES` | `1` | 中间步骤图像数，范围 0-3 |
 
-PowerShell 示例：
+添加完全部变量后点击 **部署**。项目已设置 `keep_vars: true`，以后运行 `npm run deploy:cf` 时会保留这些 CF 后台变量，不会用仓库配置覆盖或删除它们。
 
-```powershell
-$env:VITE_DEFAULT_API_URL="https://api.openai.com/v1"; npm run deploy:cf
-```
+API Key 不属于 Worker 配置，继续由用户在浏览器本地填写和保存。只读开启后，旧持久化数据、导入配置和页面 URL 参数均不能覆盖 Worker 配置；仅 API Key 可以保留和编辑，未启用首次 API Key 必填提示时也可通过 `?apiKey=` 提供。
 
-**携带默认配置参数**：`VITE_DEFAULT_API_URL` 支持通过 URL 查询参数预设默认配置，可用参数参考下方的：“URL 传参快速填充”：`apiUrl`、`apiKey`、`apiMode`、`model`、`profileName`、`codexCli`、`streamImages`、`streamPartialImages`。
-
-**导入自定义服务商配置**：`VITE_DEFAULT_API_URL` 除了填写普通 API 地址外，也支持直接填写 `.json` 配置 URL 或带 `settings` 参数的分享 URL。设为配置 URL 时，页面启动后会自动导入其中的自定义服务商和 API 配置。
-
-**仅展示默认配置**：构建前设置 `VITE_SHOW_DEFAULT_CONFIG_ONLY=true` 后，如果已配置默认 API URL 或默认代理，前端会禁用“当前配置”和“服务商类型”的下拉切换。通过页面 URL 参数传入的配置只会覆盖当前配置字段，不会新建配置、切换服务商类型或导入自定义服务商；`VITE_DEFAULT_API_URL` 本身仍可使用配置 URL 来定义部署端默认服务商。
+**允许指定系统嵌入**：`public/_headers` 通过 CSP `frame-ancestors` 控制 Cloudflare 静态站点的 iframe 父页面。默认允许同源、`https://api.api2cn.com` 和 `https://cf.api2cn.com`，修改后需重新构建并部署。
 
 </details>
 
@@ -341,7 +346,7 @@ services:
 
 **导入自定义服务商配置**：`VITE_DEFAULT_API_URL` 除了填写普通 API 地址外，也支持直接填写 `.json` 配置 URL 或带 `settings` 参数的分享 URL。设为配置 URL 时，页面启动后会自动导入其中的自定义服务商和 API 配置。
 
-**仅展示默认配置**：在 `.env.local` 中加入 `VITE_SHOW_DEFAULT_CONFIG_ONLY=true` 后，如果已配置默认 API URL 或默认代理，前端会禁用“当前配置”和“服务商类型”的下拉切换。通过页面 URL 参数传入的配置只会覆盖当前配置字段，不会新建配置、切换服务商类型或导入自定义服务商；`VITE_DEFAULT_API_URL` 本身仍可使用配置 URL 来定义部署端默认服务商。
+**固定默认配置**：在 `.env.local` 中加入 `VITE_SHOW_DEFAULT_CONFIG_ONLY=true` 后，如果已配置默认 API URL 或默认代理，前端会固定当前配置，并锁定除 API Key 外的全部 API 配置项。页面 URL 参数不能覆盖这些只读字段，API Key 仍可在浏览器本地填写。
 
 ```bash
 npm install

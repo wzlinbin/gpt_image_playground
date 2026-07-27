@@ -10,12 +10,21 @@ import { buildSettingsFromUrlParams, clearUrlSettingParams, hasUrlSettingParams 
 
 afterEach(() => {
   vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
 })
 
-async function importDefaultConfigOnlyUrlSettings() {
+async function importDefaultConfigOnlyUrlSettings(defaultApiUrl = 'https://default.example.com/v1') {
   vi.resetModules()
   vi.stubEnv('VITE_SHOW_DEFAULT_CONFIG_ONLY', 'true')
-  vi.stubEnv('VITE_DEFAULT_API_URL', 'https://default.example.com/v1')
+  vi.stubEnv('VITE_DEFAULT_API_URL', defaultApiUrl)
+  return import('./urlSettings')
+}
+
+async function importApiKeyPromptUrlSettings() {
+  vi.resetModules()
+  vi.stubEnv('VITE_SHOW_DEFAULT_CONFIG_ONLY', 'true')
+  vi.stubEnv('VITE_REQUIRE_API_KEY_PROMPT', 'true')
+  vi.stubEnv('VITE_DEFAULT_API_URL', 'https://api.api2cn.com')
   return import('./urlSettings')
 }
 
@@ -355,7 +364,7 @@ describe('URL settings params', () => {
     })
   })
 
-  it('patches the active profile instead of creating a new one when only default config is shown', async () => {
+  it('只读模式只允许查询参数覆盖 API Key', async () => {
     const { buildSettingsFromUrlParams } = await importDefaultConfigOnlyUrlSettings()
     const current = normalizeSettings(DEFAULT_SETTINGS)
     const next = normalizeSettings({
@@ -369,11 +378,11 @@ describe('URL settings params', () => {
     expect(next.profiles[0]).toMatchObject({
       id: current.activeProfileId,
       provider: 'openai',
-      name: '导入配置',
-      baseUrl: 'https://api.example.com/v1',
+      name: '默认',
+      baseUrl: 'https://default.example.com/v1',
       apiKey: 'test-key',
-      model: 'custom-model',
-      apiMode: 'responses',
+      model: DEFAULT_IMAGES_MODEL,
+      apiMode: 'images',
     })
   })
 
@@ -424,7 +433,27 @@ describe('URL settings params', () => {
     })
   })
 
-  it('patches from a matching imported profile without importing custom providers when only default config is shown', async () => {
+  it('只读模式忽略除 API Key 外的全部查询参数', async () => {
+    const { buildSettingsFromUrlParams } = await importDefaultConfigOnlyUrlSettings()
+    const current = normalizeSettings(DEFAULT_SETTINGS)
+    const next = normalizeSettings({
+      ...current,
+      ...buildSettingsFromUrlParams(current, new URLSearchParams(
+        'apiUrl=https%3A%2F%2Fchanged.example.com&profileName=用户修改&apiKey=url-key&model=url-model',
+      )),
+    })
+
+    expect(next.profiles).toHaveLength(1)
+    expect(next.profiles[0]).toMatchObject({
+      name: '默认',
+      provider: 'openai',
+      baseUrl: 'https://default.example.com/v1',
+      apiKey: 'url-key',
+      model: DEFAULT_IMAGES_MODEL,
+    })
+  })
+
+  it('只读模式仅从匹配的导入配置读取 API Key', async () => {
     const { buildSettingsFromUrlParams } = await importDefaultConfigOnlyUrlSettings()
     const importedSettings = {
       customProviders: [{
@@ -477,19 +506,19 @@ describe('URL settings params', () => {
     expect(next.profiles[0]).toMatchObject({
       id: current.activeProfileId,
       provider: 'openai',
-      name: 'OpenAI Profile',
-      baseUrl: 'https://openai.example.com/v1',
+      name: '默认',
+      baseUrl: 'https://default.example.com/v1',
       apiKey: 'openai-key',
-      model: 'openai-model',
-      timeout: 120,
-      apiMode: 'responses',
-      codexCli: true,
-      apiProxy: true,
+      model: DEFAULT_IMAGES_MODEL,
+      timeout: 600,
+      apiMode: 'images',
+      codexCli: false,
+      apiProxy: false,
     })
   })
 
-  it('does not switch away from the default custom provider when only default config is shown', async () => {
-    const { buildSettingsFromUrlParams } = await importDefaultConfigOnlyUrlSettings()
+  it('只读模式不切换自定义服务商且仅更新 API Key', async () => {
+    const { buildSettingsFromUrlParams } = await importDefaultConfigOnlyUrlSettings('https://default.example.com/provider.json')
     const customProvider = {
       id: 'custom-default',
       name: 'Custom Default',
@@ -558,12 +587,33 @@ describe('URL settings params', () => {
     expect(next.profiles[0]).toMatchObject({
       id: current.activeProfileId,
       provider: customProvider.id,
-      name: 'Patched Custom Default',
-      baseUrl: 'https://patched-custom.example.com/v1',
+      name: 'Custom Default Profile',
+      baseUrl: 'https://custom-default.example.com/v1',
       apiKey: 'patched-custom-key',
-      model: 'patched-custom-model',
-      timeout: 240,
+      model: 'custom-default-model',
+      timeout: 600,
       apiMode: 'images',
     })
+  })
+
+  it('ignores every URL API setting when the API key prompt is required', async () => {
+    const { buildSettingsFromUrlParams } = await importApiKeyPromptUrlSettings()
+    const current = normalizeSettings({
+      ...DEFAULT_SETTINGS,
+      profiles: [createDefaultOpenAIProfile({ apiKey: 'saved-key' })],
+    })
+    const params = new URLSearchParams(
+      'apiUrl=https%3A%2F%2Fchanged.example.com&apiKey=url-key&model=url-model&apiMode=responses&codexCli=true&streamImages=true&streamPartialImages=3',
+    )
+    params.set('settings', JSON.stringify({
+      profiles: [createDefaultOpenAIProfile({
+        apiKey: 'json-key',
+        model: 'json-model',
+        timeout: 10,
+        responseFormatB64Json: true,
+      })],
+    }))
+
+    expect(buildSettingsFromUrlParams(current, params)).toEqual({})
   })
 })

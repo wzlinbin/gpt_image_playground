@@ -1,0 +1,1 @@
+globalThis.__GPT_IMAGE_PLAYGROUND_WORKER_CONFIG__ = {}

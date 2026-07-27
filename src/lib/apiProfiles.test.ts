@@ -19,6 +19,7 @@ import {
 
 afterEach(() => {
   vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
 })
 
 describe('validateApiProfile', () => {
@@ -76,6 +77,237 @@ describe('default API URL env', () => {
 
     expect(DEFAULT_SETTINGS.baseUrl).toBe('')
     expect(DEFAULT_SETTINGS.profiles[0].baseUrl).toBe('')
+  })
+
+  it('shows the API key prompt without locking editable profile settings', async () => {
+    vi.resetModules()
+    vi.stubEnv('VITE_REQUIRE_API_KEY_PROMPT', 'true')
+    vi.stubEnv('VITE_SHOW_DEFAULT_CONFIG_ONLY', 'false')
+    vi.stubEnv('VITE_DEFAULT_API_URL', 'https://api.api2cn.com')
+
+    const {
+      DEFAULT_SETTINGS,
+      createDefaultOpenAIProfile,
+      isApiKeyPromptRequired,
+      normalizeSettings,
+    } = await import('./apiProfiles')
+    const profile = createDefaultOpenAIProfile({
+      name: '测试配置',
+      baseUrl: 'https://changed.example.com',
+      model: 'test-model',
+      timeout: 120,
+      apiMode: 'responses',
+    })
+    const next = normalizeSettings({
+      ...DEFAULT_SETTINGS,
+      profiles: [profile],
+      activeProfileId: profile.id,
+    })
+
+    expect(isApiKeyPromptRequired()).toBe(true)
+    expect(next.profiles[0]).toMatchObject({
+      name: '测试配置',
+      baseUrl: 'https://changed.example.com',
+      model: 'test-model',
+      timeout: 120,
+      apiMode: 'responses',
+    })
+  })
+
+  it('restores every API field except the key when the key prompt is required', async () => {
+    vi.resetModules()
+    vi.stubEnv('VITE_SHOW_DEFAULT_CONFIG_ONLY', 'true')
+    vi.stubEnv('VITE_REQUIRE_API_KEY_PROMPT', 'true')
+    vi.stubEnv('VITE_DEFAULT_API_URL', 'https://api.api2cn.com')
+
+    const {
+      DEFAULT_OPENAI_PROFILE_ID,
+      DEFAULT_SETTINGS,
+      createDefaultOpenAIProfile,
+      normalizeSettings,
+    } = await import('./apiProfiles')
+    const next = normalizeSettings({
+      ...DEFAULT_SETTINGS,
+      profiles: [
+        createDefaultOpenAIProfile({
+          id: DEFAULT_OPENAI_PROFILE_ID,
+          name: '用户修改的名称',
+          provider: 'fal',
+          baseUrl: 'https://changed.example.com',
+          apiKey: 'saved-key',
+          model: 'saved-model',
+          timeout: 120,
+          apiMode: 'responses',
+          codexCli: true,
+          responseFormatB64Json: true,
+          streamImages: true,
+          streamPartialImages: 3,
+        }),
+        createDefaultOpenAIProfile({
+          id: 'another-profile',
+          name: '其他配置',
+          baseUrl: 'https://other.example.com',
+        }),
+      ],
+      activeProfileId: 'another-profile',
+    })
+
+    expect(next.profiles).toHaveLength(1)
+    expect(next.activeProfileId).toBe(DEFAULT_OPENAI_PROFILE_ID)
+    expect(next.profiles[0]).toMatchObject({
+      id: DEFAULT_OPENAI_PROFILE_ID,
+      name: '默认',
+      provider: 'openai',
+      baseUrl: 'https://api.api2cn.com',
+      apiKey: 'saved-key',
+      model: DEFAULT_IMAGES_MODEL,
+      timeout: 600,
+      apiMode: 'images',
+      codexCli: false,
+      streamImages: true,
+      streamPartialImages: 1,
+    })
+    expect(next.profiles[0].responseFormatB64Json).toBe(true)
+    expect(next.model).toBe(DEFAULT_IMAGES_MODEL)
+    expect(next.apiKey).toBe('saved-key')
+    expect(next.streamImages).toBe(true)
+  })
+})
+
+describe('Worker API 配置', () => {
+  it('只读开启时强制恢复全部 Worker 配置并保留浏览器 API Key', async () => {
+    vi.resetModules()
+    vi.stubGlobal('__GPT_IMAGE_PLAYGROUND_WORKER_CONFIG__', {
+      apiConfigReadOnly: 'true',
+      apiConfig: {
+        name: 'Worker 配置',
+        provider: 'openai',
+        baseUrl: 'https://worker.example.com/v1',
+        model: 'worker-model',
+        timeout: 333,
+        apiMode: 'responses',
+        codexCli: true,
+        apiProxy: true,
+        responseFormatB64Json: true,
+        streamImages: true,
+        streamPartialImages: 3,
+      },
+    })
+
+    const {
+      DEFAULT_OPENAI_PROFILE_ID,
+      createDefaultOpenAIProfile,
+      isApiConfigReadOnly,
+      normalizeSettings,
+    } = await import('./apiProfiles')
+    const next = normalizeSettings({
+      profiles: [createDefaultOpenAIProfile({
+        name: '浏览器配置',
+        baseUrl: 'https://local.example.com',
+        apiKey: 'saved-key',
+        model: 'local-model',
+        timeout: 10,
+        apiMode: 'images',
+        codexCli: false,
+        apiProxy: false,
+        responseFormatB64Json: false,
+        streamImages: false,
+        streamPartialImages: 0,
+        providerDrafts: { openai: { model: 'draft-model' } },
+      })],
+    })
+
+    expect(isApiConfigReadOnly()).toBe(true)
+    expect(next.profiles).toHaveLength(1)
+    expect(next.profiles[0]).toMatchObject({
+      id: DEFAULT_OPENAI_PROFILE_ID,
+      name: 'Worker 配置',
+      provider: 'openai',
+      baseUrl: 'https://worker.example.com/v1',
+      apiKey: 'saved-key',
+      model: 'worker-model',
+      timeout: 333,
+      apiMode: 'responses',
+      codexCli: true,
+      apiProxy: true,
+      responseFormatB64Json: true,
+      streamImages: true,
+      streamPartialImages: 3,
+    })
+    expect(next.profiles[0].providerDrafts).toBeUndefined()
+  })
+
+  it('只读关闭时 Worker 配置作为默认值且本地配置可以覆盖', async () => {
+    vi.resetModules()
+    vi.stubEnv('VITE_SHOW_DEFAULT_CONFIG_ONLY', 'true')
+    vi.stubEnv('VITE_DEFAULT_API_URL', 'https://vite.example.com/v1')
+    vi.stubGlobal('__GPT_IMAGE_PLAYGROUND_WORKER_CONFIG__', {
+      apiConfigReadOnly: false,
+      apiConfig: {
+        name: 'Worker 默认配置',
+        provider: 'openai',
+        baseUrl: 'https://worker.example.com/v1',
+        model: 'worker-model',
+        timeout: 240,
+      },
+    })
+
+    const {
+      DEFAULT_SETTINGS,
+      createDefaultOpenAIProfile,
+      isApiConfigReadOnly,
+      normalizeSettings,
+    } = await import('./apiProfiles')
+    const localProfile = createDefaultOpenAIProfile({
+      name: '本地配置',
+      baseUrl: 'https://local.example.com/v1',
+      model: 'local-model',
+      timeout: 90,
+    })
+    const next = normalizeSettings({
+      ...DEFAULT_SETTINGS,
+      profiles: [localProfile],
+      activeProfileId: localProfile.id,
+    })
+
+    expect(isApiConfigReadOnly()).toBe(false)
+    expect(DEFAULT_SETTINGS.profiles[0]).toMatchObject({
+      name: 'Worker 默认配置',
+      baseUrl: 'https://worker.example.com/v1',
+      model: 'worker-model',
+      timeout: 240,
+    })
+    expect(next.profiles[0]).toMatchObject({
+      name: '本地配置',
+      baseUrl: 'https://local.example.com/v1',
+      model: 'local-model',
+      timeout: 90,
+    })
+  })
+
+  it('支持由 Worker 将默认服务商设为 fal', async () => {
+    vi.resetModules()
+    vi.stubGlobal('__GPT_IMAGE_PLAYGROUND_WORKER_CONFIG__', {
+      apiConfigReadOnly: true,
+      apiConfig: {
+        name: 'fal 配置',
+        provider: 'fal',
+        baseUrl: 'https://fal-proxy.example.com',
+        model: 'fal-test-model',
+        timeout: 180,
+      },
+    })
+
+    const { DEFAULT_SETTINGS } = await import('./apiProfiles')
+
+    expect(DEFAULT_SETTINGS.profiles[0]).toMatchObject({
+      name: 'fal 配置',
+      provider: 'fal',
+      baseUrl: 'https://fal-proxy.example.com',
+      model: 'fal-test-model',
+      timeout: 180,
+      apiMode: 'images',
+    })
   })
 })
 

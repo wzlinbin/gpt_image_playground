@@ -18,12 +18,16 @@ import { shouldUseApiProxy } from './devProxy'
 import { normalizeStreamPartialImages, parseDefaultApiUrl } from './defaultApiUrl'
 import { readRuntimeEnv } from './runtimeEnv'
 import { isImportableConfigUrl } from './customProviderConfigUrl'
+import { readWorkerRuntimeConfig } from './workerRuntimeConfig'
 
 const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1'
 const RAW_DEFAULT_API_URL = readRuntimeEnv(import.meta.env.VITE_DEFAULT_API_URL)
 const DEFAULT_OPENAI_API_PROXY = readRuntimeEnv(import.meta.env.VITE_API_PROXY_AVAILABLE) === 'true'
 const DOCKER_DEPLOYMENT = readRuntimeEnv(import.meta.env.VITE_DOCKER_DEPLOYMENT) === 'true'
 const SHOW_DEFAULT_CONFIG_ONLY = readRuntimeEnv(import.meta.env.VITE_SHOW_DEFAULT_CONFIG_ONLY) === 'true'
+const REQUIRE_API_KEY_PROMPT = readRuntimeEnv(import.meta.env.VITE_REQUIRE_API_KEY_PROMPT) === 'true'
+const WORKER_RUNTIME_CONFIG = readWorkerRuntimeConfig()
+const WORKER_API_CONFIG = WORKER_RUNTIME_CONFIG.apiConfig
 const DEFAULT_API_URL_PATCH = isImportableConfigUrl(RAW_DEFAULT_API_URL)
   ? null
   : parseDefaultApiUrl(RAW_DEFAULT_API_URL || (DOCKER_DEPLOYMENT && DEFAULT_OPENAI_API_PROXY ? '' : OPENAI_DEFAULT_BASE_URL))
@@ -76,8 +80,13 @@ export function normalizeAgentMaxToolRounds(value: unknown, fallback: number | u
   return Math.min(50, Math.max(1, Math.trunc(numeric)))
 }
 
-export function isDefaultConfigOnlyEnabled(): boolean {
+export function isApiConfigReadOnly(): boolean {
+  if (WORKER_RUNTIME_CONFIG.apiConfigReadOnly !== null) return WORKER_RUNTIME_CONFIG.apiConfigReadOnly
   return SHOW_DEFAULT_CONFIG_ONLY && (Boolean(RAW_DEFAULT_API_URL) || DEFAULT_OPENAI_API_PROXY)
+}
+
+export function isApiKeyPromptRequired(): boolean {
+  return REQUIRE_API_KEY_PROMPT
 }
 
 function normalizeZipDownloadRoutes(value: unknown) {
@@ -311,20 +320,22 @@ export function normalizeCustomProviderDefinitions(input: unknown): CustomProvid
 }
 
 export function createDefaultOpenAIProfile(overrides: Partial<ApiProfile> = {}): ApiProfile {
-  const apiMode = overrides.apiMode ?? DEFAULT_API_URL_PATCH?.apiMode ?? 'images'
-  const streamImages = overrides.streamImages ?? DEFAULT_API_URL_PATCH?.streamImages ?? getDefaultStreamImages('openai', apiMode)
+  const workerConfig = !WORKER_API_CONFIG?.provider || WORKER_API_CONFIG.provider === 'openai' ? WORKER_API_CONFIG : null
+  const apiMode = overrides.apiMode ?? workerConfig?.apiMode ?? DEFAULT_API_URL_PATCH?.apiMode ?? 'images'
+  const streamImages = overrides.streamImages ?? workerConfig?.streamImages ?? DEFAULT_API_URL_PATCH?.streamImages ?? getDefaultStreamImages('openai', apiMode)
 
   return {
     id: DEFAULT_OPENAI_PROFILE_ID,
-    name: DEFAULT_API_URL_PATCH?.name ?? '默认',
+    name: workerConfig?.name ?? DEFAULT_API_URL_PATCH?.name ?? '默认',
     provider: 'openai',
-    baseUrl: DEFAULT_BASE_URL,
+    baseUrl: workerConfig?.baseUrl ?? DEFAULT_BASE_URL,
     apiKey: DEFAULT_API_URL_PATCH?.apiKey ?? '',
-    model: DEFAULT_API_URL_PATCH?.model ?? DEFAULT_IMAGES_MODEL,
-    timeout: DEFAULT_API_TIMEOUT,
-    codexCli: DEFAULT_API_URL_PATCH?.codexCli ?? false,
-    apiProxy: DEFAULT_OPENAI_API_PROXY,
-    streamPartialImages: DEFAULT_API_URL_PATCH?.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES,
+    model: workerConfig?.model ?? DEFAULT_API_URL_PATCH?.model ?? DEFAULT_IMAGES_MODEL,
+    timeout: workerConfig?.timeout ?? DEFAULT_API_TIMEOUT,
+    codexCli: workerConfig?.codexCli ?? DEFAULT_API_URL_PATCH?.codexCli ?? false,
+    apiProxy: workerConfig?.apiProxy ?? DEFAULT_OPENAI_API_PROXY,
+    responseFormatB64Json: workerConfig?.responseFormatB64Json,
+    streamPartialImages: workerConfig?.streamPartialImages ?? DEFAULT_API_URL_PATCH?.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES,
     ...overrides,
     apiMode,
     streamImages,
@@ -332,21 +343,31 @@ export function createDefaultOpenAIProfile(overrides: Partial<ApiProfile> = {}):
 }
 
 export function createDefaultFalProfile(overrides: Partial<ApiProfile> = {}): ApiProfile {
+  const workerConfig = WORKER_API_CONFIG?.provider === 'fal' ? WORKER_API_CONFIG : null
+
   return {
     id: `fal-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-    name: '新配置',
+    name: workerConfig?.name ?? '新配置',
     provider: 'fal',
-    baseUrl: DEFAULT_FAL_BASE_URL,
+    baseUrl: workerConfig?.baseUrl ?? DEFAULT_FAL_BASE_URL,
     apiKey: '',
-    model: DEFAULT_FAL_MODEL,
-    timeout: DEFAULT_API_TIMEOUT,
+    model: workerConfig?.model ?? DEFAULT_FAL_MODEL,
+    timeout: workerConfig?.timeout ?? DEFAULT_API_TIMEOUT,
     apiMode: 'images',
     codexCli: false,
-    apiProxy: false,
+    apiProxy: workerConfig?.apiProxy ?? false,
+    responseFormatB64Json: workerConfig?.responseFormatB64Json,
     streamImages: false,
-    streamPartialImages: DEFAULT_STREAM_PARTIAL_IMAGES,
+    streamPartialImages: workerConfig?.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES,
     ...overrides,
   }
+}
+
+function createConfiguredApiProfile(overrides: Partial<ApiProfile> = {}): ApiProfile {
+  if (WORKER_API_CONFIG?.provider === 'fal') {
+    return createDefaultFalProfile({ id: DEFAULT_OPENAI_PROFILE_ID, ...overrides })
+  }
+  return createDefaultOpenAIProfile(overrides)
 }
 
 export function switchApiProfileProvider(profile: ApiProfile, provider: ApiProvider, customProvider?: CustomProviderDefinition): ApiProfile {
@@ -478,7 +499,7 @@ export function normalizeApiProfile(input: unknown, fallback?: Partial<ApiProfil
     apiMode,
     codexCli: Boolean(record.codexCli),
     apiProxy: typeof record.apiProxy === 'boolean' ? record.apiProxy : defaults.apiProxy,
-    responseFormatB64Json: record.responseFormatB64Json === true ? true : undefined,
+    responseFormatB64Json: typeof record.responseFormatB64Json === 'boolean' ? record.responseFormatB64Json : defaults.responseFormatB64Json,
     streamImages,
     streamPartialImages: normalizeStreamPartialImages(record.streamPartialImages, defaults.streamPartialImages),
     providerDrafts: normalizeProviderDrafts(record.providerDrafts, customProviderIds),
@@ -503,24 +524,49 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
   const customProviders = normalizeCustomProviderDefinitions(record.customProviders)
   const customProviderIds = new Set(customProviders.map((provider) => provider.id))
   const legacyApiMode: ApiMode = record.apiMode === 'responses' ? 'responses' : 'images'
-  const legacyProfile = createDefaultOpenAIProfile({
-    baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : DEFAULT_BASE_URL,
+  const legacyProfile = createConfiguredApiProfile({
+    ...(typeof record.baseUrl === 'string' ? { baseUrl: record.baseUrl } : {}),
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : '',
-    model: typeof record.model === 'string' && record.model.trim() ? record.model : DEFAULT_IMAGES_MODEL,
-    timeout: typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : DEFAULT_API_TIMEOUT,
-    apiMode: legacyApiMode,
-    codexCli: Boolean(record.codexCli),
-    apiProxy: typeof record.apiProxy === 'boolean' ? record.apiProxy : DEFAULT_OPENAI_API_PROXY,
-    responseFormatB64Json: record.responseFormatB64Json === true ? true : undefined,
-    streamImages: typeof record.streamImages === 'boolean' ? record.streamImages : undefined,
-    streamPartialImages: normalizeStreamPartialImages(record.streamPartialImages),
+    ...(typeof record.model === 'string' && record.model.trim() ? { model: record.model } : {}),
+    ...(typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? { timeout: record.timeout } : {}),
+    ...(record.apiMode === 'images' || record.apiMode === 'responses' ? { apiMode: legacyApiMode } : {}),
+    ...(typeof record.codexCli === 'boolean' ? { codexCli: record.codexCli } : {}),
+    ...(typeof record.apiProxy === 'boolean' ? { apiProxy: record.apiProxy } : {}),
+    ...(typeof record.responseFormatB64Json === 'boolean' ? { responseFormatB64Json: record.responseFormatB64Json } : {}),
+    ...(typeof record.streamImages === 'boolean' ? { streamImages: record.streamImages } : {}),
+    ...(record.streamPartialImages !== undefined ? { streamPartialImages: normalizeStreamPartialImages(record.streamPartialImages) } : {}),
   })
-  const profiles = Array.isArray(record.profiles) && record.profiles.length
+  const normalizedProfiles = Array.isArray(record.profiles) && record.profiles.length
     ? record.profiles.map((profile) => normalizeApiProfile(profile, undefined, customProviderIds))
     : [legacyProfile]
-  const activeProfileId = typeof record.activeProfileId === 'string' && profiles.some((p) => p.id === record.activeProfileId)
+  const normalizedActiveProfileId = typeof record.activeProfileId === 'string' && normalizedProfiles.some((p) => p.id === record.activeProfileId)
     ? record.activeProfileId
-    : profiles[0].id
+    : normalizedProfiles[0].id
+  const normalizedActive = normalizedProfiles.find((p) => p.id === normalizedActiveProfileId) ?? normalizedProfiles[0]
+  const defaultProfile = createConfiguredApiProfile()
+  const workerConfigReadOnly = WORKER_RUNTIME_CONFIG.apiConfigReadOnly === true
+  const lockDefaultOpenAIProfile = isApiConfigReadOnly() && DEFAULT_API_URL_PATCH !== null
+  const lockedProfileSource = workerConfigReadOnly
+    ? normalizedActive
+    : normalizedProfiles.find((profile) => profile.id === DEFAULT_OPENAI_PROFILE_ID) ?? normalizedActive
+  const profiles = workerConfigReadOnly
+    ? [createConfiguredApiProfile({ apiKey: lockedProfileSource.apiKey })]
+    : lockDefaultOpenAIProfile
+    ? [isApiKeyPromptRequired()
+        ? createDefaultOpenAIProfile({
+            apiKey: lockedProfileSource.apiKey,
+            responseFormatB64Json: true,
+            streamImages: true,
+          })
+        : createDefaultOpenAIProfile({
+            ...lockedProfileSource,
+            id: defaultProfile.id,
+            name: defaultProfile.name,
+            provider: defaultProfile.provider,
+            baseUrl: defaultProfile.baseUrl,
+          })]
+    : normalizedProfiles
+  const activeProfileId = workerConfigReadOnly || lockDefaultOpenAIProfile ? defaultProfile.id : normalizedActiveProfileId
   const active = profiles.find((p) => p.id === activeProfileId) ?? profiles[0]
   const agentApiConfigMode = normalizeAgentApiConfigMode(record.agentApiConfigMode)
   const firstAgentTextProfile = profiles.find(isAgentTextApiProfile)
@@ -865,4 +911,6 @@ export const DEFAULT_SETTINGS: AppSettings = normalizeSettings({
   agentApiConfigMode: 'off',
   agentTextProfileId: null,
   agentImageProfileId: null,
+  profiles: [createConfiguredApiProfile()],
+  activeProfileId: DEFAULT_OPENAI_PROFILE_ID,
 })

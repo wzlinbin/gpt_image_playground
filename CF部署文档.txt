@@ -413,3 +413,6 @@ npm run deploy:cf
 $env:CLOUDFLARE_API_TOKEN="你的 Cloudflare API Token"
 npm run deploy:cf
 如果要我继续执行部署，请先在环境变量里设置好 CLOUDFLARE_API_TOKEN，然后告诉我“继续部署”。
+
+部署配置
+npx wrangler deploy

@@ -32,7 +32,13 @@ describe('callImageApi', () => {
 
       const [, init] = fetchMock.mock.calls[0]
       const body = JSON.parse(String((init as RequestInit).body))
-      expect(body.input).toBe('Use the following text as the complete prompt. Do not rewrite it:\nprompt')
+      expect(body.input).toEqual([{
+        role: 'user',
+        content: [{
+          type: 'input_text',
+          text: 'Use the following text as the complete prompt. Do not rewrite it:\nprompt',
+        }],
+      }])
     },
   )
 
@@ -56,7 +62,13 @@ describe('callImageApi', () => {
 
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse(String((init as RequestInit).body))
-    expect(body.input).toBe('prompt')
+    expect(body.input).toEqual([{
+      role: 'user',
+      content: [{
+        type: 'input_text',
+        text: 'prompt',
+      }],
+    }])
   })
 
   it('does not add the prompt rewrite guard on Codex CLI Images API when prompt rewrite is allowed', async () => {
@@ -475,6 +487,13 @@ describe('callImageApi', () => {
     const body = JSON.parse(String((init as RequestInit).body))
     expect(body.stream).toBe(true)
     expect(body.tools[0].partial_images).toBe(1)
+    expect(body.input).toEqual([{
+      role: 'user',
+      content: [{
+        type: 'input_text',
+        text: 'Use the following text as the complete prompt. Do not rewrite it:\nprompt',
+      }],
+    }])
     expect(partialImages).toEqual(['data:image/png;base64,cGFydGlhbA=='])
     expect(result).toMatchObject({
       images: ['data:image/png;base64,ZmluYWw='],
@@ -510,6 +529,35 @@ describe('callImageApi', () => {
     ])
     expect(result.failedRequests).toEqual([{ requestIndex: 2, error: 'Failed to fetch' }])
     expect(result.actualParams).toMatchObject({ n: 2 })
+  })
+
+  it('requests stream by default for Responses API image generation', async () => {
+    const streamBody = [
+      'data: {"type":"response.completed","response":{"output":[{"type":"image_generation_call","result":"ZmluYWw=","size":"1024x1024"}]}}',
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n')
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(streamBody, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }))
+
+    const result = await callImageApi({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'test-key', apiMode: 'responses' },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+    })
+
+    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(body.stream).toBe(true)
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({ Accept: 'text/event-stream' })
+    expect(result).toMatchObject({
+      images: ['data:image/png;base64,ZmluYWw='],
+      actualParams: { size: '1024x1024' },
+    })
   })
 
   it('parses Responses API image result objects in gallery mode', async () => {
