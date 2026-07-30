@@ -804,3 +804,20 @@ Playwright 连续三次未完成，按规则暂停验证并回到验收设计复
 - 本地 Worker 只读、API Key、Responses 强制流式和 api2cn 回退完整。
 - 所有冲突逐项解决，不使用整文件覆盖。
 - 验证前不创建合并提交；失败时保留可审计工作树并修复后重跑。
+
+### 冲突解决与编码中监控
+
+时间：2026-07-30 11:49:00 +08:00
+
+- 已逐块解决 `README.md`、`src/lib/api.test.ts`、`src/lib/apiProfiles.ts`、`src/lib/openaiCompatibleImageApi.ts`、`src/lib/urlSettings.ts` 共 5 个冲突文件，没有使用整文件覆盖。
+- Responses API 保持 `stream: true` 和 `Accept: text/event-stream`，同时加入 `reasoning.effort`、Codex CLI 尺寸提示和上游统一提示词保护前缀。
+- api2cn 的标准事件优先、文本增量图片回退、图片签名校验和缺图错误均保留。
+- Worker 配置链新增 `API_CONFIG_REASONING_EFFORT`，复用 `normalizeReasoningEffort`，只读设置页同步禁用推理强度选择。
+- URL 只读分支仍只接受 API Key；新增测试确认 `reasoningEffort`、模式、模型、Codex CLI 和流式参数均不能覆盖部署端配置。
+- 命名和代码风格继续遵循项目现有 camelCase、2 空格、单引号、无分号约定；未新增依赖或平行配置体系。
+
+### 阶段验证记录
+
+- 第一次定向测试：9 个文件、244 个用例中 243 个通过；唯一失败为 `api.test.ts` 残留旧提示词断言，运行结果符合上游新提示词协议。
+- 补偿：更新旧断言并强化只读 URL 测试；第二次定向测试覆盖 5 个关键文件、105 个用例，全部通过。
+- `git diff --check`：当前通过，仅有 Git 的 Windows 换行转换提示，不属于空白错误。
