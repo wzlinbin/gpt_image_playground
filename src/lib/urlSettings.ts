@@ -9,18 +9,20 @@ import {
   isApiConfigReadOnly,
   mergeImportedSettings,
   normalizeSettings,
+  normalizeReasoningEffort,
   normalizeStreamPartialImages,
 } from './apiProfiles'
 
-const URL_SETTING_KEYS = ['settings', 'apiUrl', 'apiKey', 'codexCli', 'apiMode', 'model', 'profileName', 'streamImages', 'streamPartialImages']
+const URL_SETTING_KEYS = ['settings', 'apiUrl', 'apiKey', 'codexCli', 'apiMode', 'model', 'profileName', 'reasoningEffort', 'streamImages', 'streamPartialImages']
 
-function getProfileDedupKey(profile: Pick<AppSettings['profiles'][number], 'provider' | 'baseUrl' | 'apiKey' | 'model' | 'apiMode' | 'codexCli' | 'streamImages' | 'streamPartialImages'>) {
+function getProfileDedupKey(profile: Pick<AppSettings['profiles'][number], 'provider' | 'baseUrl' | 'apiKey' | 'model' | 'apiMode' | 'reasoningEffort' | 'codexCli' | 'streamImages' | 'streamPartialImages'>) {
   return JSON.stringify([
     profile.provider,
     profile.baseUrl.trim().replace(/\/+$/, '').toLowerCase(),
     profile.apiKey.trim(),
     profile.model.trim(),
     profile.apiMode,
+    profile.reasoningEffort,
     profile.codexCli === true,
     profile.streamImages === true,
     profile.streamPartialImages ?? 0,
@@ -130,13 +132,14 @@ export function buildSettingsFromUrlParams(currentSettings: Partial<AppSettings>
   const codexCliParam = searchParams.get('codexCli')
   const apiModeParam = searchParams.get('apiMode')
   const modelParam = searchParams.get('model')
+  const reasoningEffortParam = searchParams.get('reasoningEffort')
   const profileNameParam = searchParams.get('profileName')
   const profileName = profileNameParam?.trim() ?? ''
   const streamImagesParam = searchParams.get('streamImages')
   const streamPartialImagesParam = searchParams.get('streamPartialImages')
   const apiMode: ApiMode | undefined = apiModeParam === 'images' || apiModeParam === 'responses' ? apiModeParam : undefined
 
-  const hasLegacyOpenAIParams = apiUrlParam !== null || apiKeyParam !== null || codexCliParam !== null || apiMode !== undefined || modelParam !== null || profileNameParam !== null || streamImagesParam !== null || streamPartialImagesParam !== null
+  const hasLegacyOpenAIParams = apiUrlParam !== null || apiKeyParam !== null || codexCliParam !== null || apiMode !== undefined || modelParam !== null || profileNameParam !== null || reasoningEffortParam !== null || streamImagesParam !== null || streamPartialImagesParam !== null
   const settings = importedSettings == null
     ? normalizeSettings(currentSettings)
     : activateFirstImportedProfile(mergeImportedSettings(currentSettings, importedSettings), importedSettings)
@@ -152,6 +155,7 @@ export function buildSettingsFromUrlParams(currentSettings: Partial<AppSettings>
     if (apiUrlParam !== null) profile.baseUrl = normalizeBaseUrl(apiUrlParam.trim())
     if (apiKeyParam !== null) profile.apiKey = apiKeyParam.trim()
     if (modelParam !== null && modelParam.trim()) profile.model = modelParam.trim()
+    if (reasoningEffortParam !== null) profile.reasoningEffort = normalizeReasoningEffort(reasoningEffortParam)
     if (profileName) profile.name = profileName
     if (codexCliParam !== null) profile.codexCli = codexCliParam.trim().toLowerCase() === 'true'
     if (streamImagesParam !== null) profile.streamImages = streamImagesParam.trim().toLowerCase() === 'true'

@@ -63,6 +63,19 @@ describe('URL settings params', () => {
     })
   })
 
+  it('uses reasoning effort from URL params for Responses profiles', () => {
+    const current = normalizeSettings(DEFAULT_SETTINGS)
+    const next = normalizeSettings({
+      ...current,
+      ...buildSettingsFromUrlParams(current, new URLSearchParams('apiMode=responses&reasoningEffort=max')),
+    })
+
+    expect(next.profiles.find((profile) => profile.id === next.activeProfileId)).toMatchObject({
+      apiMode: 'responses',
+      reasoningEffort: 'max',
+    })
+  })
+
   it('uses profile name from URL params for OpenAI profiles', () => {
     const current = normalizeSettings(DEFAULT_SETTINGS)
     const next = normalizeSettings({
@@ -208,7 +221,7 @@ describe('URL settings params', () => {
   })
 
   it('clears known URL setting params without touching unrelated params', () => {
-    const params = new URLSearchParams('apiUrl=https://api.example.com/v1&apiKey=test-key&model=test-model&profileName=test-profile&streamImages=false&streamPartialImages=3&foo=bar')
+    const params = new URLSearchParams('reasoningEffort=high&foo=bar')
 
     expect(hasUrlSettingParams(params)).toBe(true)
     clearUrlSettingParams(params)
@@ -439,7 +452,7 @@ describe('URL settings params', () => {
     const next = normalizeSettings({
       ...current,
       ...buildSettingsFromUrlParams(current, new URLSearchParams(
-        'apiUrl=https%3A%2F%2Fchanged.example.com&profileName=用户修改&apiKey=url-key&model=url-model',
+        'apiUrl=https%3A%2F%2Fchanged.example.com&profileName=用户修改&apiKey=url-key&model=url-model&apiMode=responses&reasoningEffort=max&codexCli=true&streamImages=true&streamPartialImages=3',
       )),
     })
 
@@ -450,6 +463,11 @@ describe('URL settings params', () => {
       baseUrl: 'https://default.example.com/v1',
       apiKey: 'url-key',
       model: DEFAULT_IMAGES_MODEL,
+      apiMode: 'images',
+      reasoningEffort: undefined,
+      codexCli: false,
+      streamImages: false,
+      streamPartialImages: 1,
     })
   })
 

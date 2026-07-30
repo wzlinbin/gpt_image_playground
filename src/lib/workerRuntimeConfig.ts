@@ -1,6 +1,6 @@
-import type { ApiMode, BuiltInApiProvider } from '../types'
+import type { ApiMode, BuiltInApiProvider, ReasoningEffort } from '../types'
 
-import { normalizeStreamPartialImages } from './defaultApiUrl'
+import { normalizeReasoningEffort, normalizeStreamPartialImages } from './defaultApiUrl'
 import { normalizeBaseUrl } from './devProxy'
 
 export interface WorkerApiConfig {
@@ -10,6 +10,7 @@ export interface WorkerApiConfig {
   model?: string
   timeout?: number
   apiMode?: ApiMode
+  reasoningEffort?: ReasoningEffort
   codexCli?: boolean
   apiProxy?: boolean
   responseFormatB64Json?: boolean
@@ -58,6 +59,7 @@ export function normalizeWorkerApiConfig(input: unknown): WorkerApiConfig | null
   const timeout = Number(record.timeout)
   const provider = record.provider === 'openai' || record.provider === 'fal' ? record.provider : undefined
   const apiMode = record.apiMode === 'images' || record.apiMode === 'responses' ? record.apiMode : undefined
+  const reasoningEffort = normalizeReasoningEffort(record.reasoningEffort)
   const codexCli = normalizeBoolean(record.codexCli)
   const apiProxy = normalizeBoolean(record.apiProxy)
   const responseFormatB64Json = normalizeBoolean(record.responseFormatB64Json)
@@ -69,6 +71,7 @@ export function normalizeWorkerApiConfig(input: unknown): WorkerApiConfig | null
   if (model) config.model = model
   if (Number.isFinite(timeout)) config.timeout = Math.min(600, Math.max(10, Math.trunc(timeout)))
   if (apiMode) config.apiMode = apiMode
+  if (reasoningEffort) config.reasoningEffort = reasoningEffort
   if (codexCli !== undefined) config.codexCli = codexCli
   if (apiProxy !== undefined) config.apiProxy = apiProxy
   if (responseFormatB64Json !== undefined) config.responseFormatB64Json = responseFormatB64Json

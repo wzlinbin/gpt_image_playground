@@ -777,3 +777,30 @@ Playwright 连续三次未完成，按规则暂停验证并回到验收设计复
 
 - 无配置或数据迁移：现有 Base URL、API Key、Images/Responses 模式、流式和 Base64 开关保持不变。
 - 回滚只需还原 `src/lib/openaiCompatibleImageApi.ts` 和 `src/lib/api.test.ts` 的本次差异；不涉及 IndexedDB、store 或用户数据。
+
+## 安全合并上游 v0.7.2
+
+### 需求分析与工具记录
+
+时间：2026-07-30 10:33:00 +08:00
+
+- 上游最新正式版为 `v0.7.2`（`aa789c3`），本地合并前为 `05dee21`。
+- 已执行 `git fetch --prune upstream`，共同基点为 `85af989`；本地领先 5 个提交、落后上游 6 个提交。
+- 已创建 `backup/pre-upstream-v0.7.2-20260730`，验证其指向 `05dee21`。
+- 三方合并预计 5 个明确冲突文件；双方共有 10 个重叠修改文件。
+- 指定的 `sequential-thinking`、`shrimp-task-manager`、`desktop-commander`、Context7 和 GitHub 专用工具未提供；使用计划工具、Git 三方差异、GitHub Release API 和本地验证补偿。
+
+### 编码前检查 - 安全合并 v0.7.2
+
+- 已查阅 `.claude/context-summary-upstream-v0.7.2.md`。
+- 将复用上游 `normalizeReasoningEffort`、尺寸工具和 profile 传播链路。
+- 将复用本地 Worker 运行时配置、只读归一化和 api2cn SSE 回退。
+- 命名与风格遵循 PascalCase/camelCase/UPPER_SNAKE_CASE、2 空格、单引号、无分号。
+- 确认不重复造轮子：已对比 profile、URL、图片 API、Agent API、Worker 配置和尺寸模块，采用语义合并。
+
+### 验收契约
+
+- 上游 reasoning effort 和 Codex CLI size 功能完整。
+- 本地 Worker 只读、API Key、Responses 强制流式和 api2cn 回退完整。
+- 所有冲突逐项解决，不使用整文件覆盖。
+- 验证前不创建合并提交；失败时保留可审计工作树并修复后重跑。

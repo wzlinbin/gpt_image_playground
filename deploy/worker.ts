@@ -11,6 +11,7 @@ interface DashboardEnv extends Env {
   API_CONFIG_MODEL?: unknown
   API_CONFIG_TIMEOUT?: unknown
   API_CONFIG_MODE?: unknown
+  API_CONFIG_REASONING_EFFORT?: unknown
   API_CONFIG_CODEX_CLI?: unknown
   API_CONFIG_API_PROXY?: unknown
   API_CONFIG_RESPONSE_FORMAT_B64_JSON?: unknown
@@ -26,6 +27,7 @@ export function readDashboardApiConfig(env: DashboardEnv) {
     model: env.API_CONFIG_MODEL,
     timeout: env.API_CONFIG_TIMEOUT,
     apiMode: env.API_CONFIG_MODE,
+    reasoningEffort: env.API_CONFIG_REASONING_EFFORT,
     codexCli: env.API_CONFIG_CODEX_CLI,
     apiProxy: env.API_CONFIG_API_PROXY,
     responseFormatB64Json: env.API_CONFIG_RESPONSE_FORMAT_B64_JSON,

@@ -15,6 +15,7 @@ describe('normalizeWorkerApiConfig', () => {
       model: '  gpt-image-test  ',
       timeout: 120,
       apiMode: 'responses',
+      reasoningEffort: 'high',
       codexCli: true,
       apiProxy: false,
       responseFormatB64Json: true,
@@ -29,6 +30,7 @@ describe('normalizeWorkerApiConfig', () => {
       model: 'gpt-image-test',
       timeout: 120,
       apiMode: 'responses',
+      reasoningEffort: 'high',
       codexCli: true,
       apiProxy: false,
       responseFormatB64Json: true,
@@ -53,7 +55,7 @@ describe('normalizeWorkerApiConfig', () => {
   })
 
   it('忽略无效字段和无效 JSON', () => {
-    expect(normalizeWorkerApiConfig({ provider: 'unknown', timeout: 'invalid', apiMode: 'chat' })).toBeNull()
+    expect(normalizeWorkerApiConfig({ provider: 'unknown', timeout: 'invalid', apiMode: 'chat', reasoningEffort: 'extreme' })).toBeNull()
     expect(normalizeWorkerApiConfig('{invalid')).toBeNull()
   })
 })
