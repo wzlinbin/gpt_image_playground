@@ -3,6 +3,8 @@ import { DEFAULT_PARAMS } from '../types'
 import { DEFAULT_SETTINGS } from './apiProfiles'
 import { callImageApi } from './api'
 
+const FALLBACK_IMAGE_BASE64 = `iVBORw0KGgo${'A'.repeat(109)}`
+
 describe('callImageApi', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -364,6 +366,236 @@ describe('callImageApi', () => {
     })
   })
 
+  it.each([
+    ['JSON', (b64: string) => JSON.stringify({ data: { result: { image_base64: b64 } } })],
+    ['Data URL', (b64: string) => `data:image/png;base64,${b64}`],
+    ['使用请求输出格式 MIME 的纯 Base64', (b64: string) => b64],
+  ])('兼容 Images API 的 response.output_text.delta %s 图片文本', async (_, createText) => {
+    const b64 = FALLBACK_IMAGE_BASE64
+    const text = createText(b64)
+    const chunks = [text.slice(0, 31), text.slice(31, 79), text.slice(79)]
+    const streamBody = chunks.flatMap((delta) => [
+      `data: ${JSON.stringify({ type: 'response.output_text.delta', delta })}`,
+      '',
+    ]).concat(['data: [DONE]', '']).join('\n')
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(streamBody, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }))
+
+    const result = await callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        streamImages: true,
+        profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
+          ...profile,
+          apiKey: 'test-key',
+          streamImages: true,
+        })),
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+    } as any)
+
+    expect(result.images).toEqual([`data:image/png;base64,${b64}`])
+  })
+
+  it('递归读取 Images API 未知流事件中的兼容图片字段', async () => {
+    const b64 = FALLBACK_IMAGE_BASE64
+    const streamBody = [
+      `data: ${JSON.stringify({ type: 'response.output_item.done', item: { result: { image_base64: b64 } } })}`,
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n')
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(streamBody, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }))
+
+    const result = await callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        streamImages: true,
+        profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
+          ...profile,
+          apiKey: 'test-key',
+          streamImages: true,
+        })),
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+    } as any)
+
+    expect(result.images).toEqual([`data:image/png;base64,${b64}`])
+  })
+
+  it('Images API 标准最终事件优先于兼容回退图片', async () => {
+    const fallbackB64 = FALLBACK_IMAGE_BASE64
+    const streamBody = [
+      `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: JSON.stringify({ result: fallbackB64 }) })}`,
+      '',
+      'data: {"type":"image_generation.completed","b64_json":"ZmluYWw=","size":"1024x1024"}',
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n')
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(streamBody, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }))
+
+    const result = await callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        streamImages: true,
+        profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
+          ...profile,
+          apiKey: 'test-key',
+          streamImages: true,
+        })),
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+    } as any)
+
+    expect(result.images).toEqual(['data:image/png;base64,ZmluYWw='])
+    expect(result.actualParams).toMatchObject({ size: '1024x1024' })
+  })
+
+  it('Images API 空标准最终事件回退时保留参数元数据', async () => {
+    const fallbackB64 = FALLBACK_IMAGE_BASE64
+    const streamBody = [
+      `data: ${JSON.stringify({ type: 'response.output_text.delta', delta: JSON.stringify({ result: fallbackB64 }) })}`,
+      '',
+      'data: {"type":"image_generation.completed","size":"1536x1024","quality":"high","revised_prompt":"改写提示词"}',
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n')
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(streamBody, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }))
+
+    const result = await callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        streamImages: true,
+        profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
+          ...profile,
+          apiKey: 'test-key',
+          streamImages: true,
+        })),
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+    } as any)
+
+    expect(result).toMatchObject({
+      images: [`data:image/png;base64,${fallbackB64}`],
+      actualParams: { size: '1536x1024', quality: 'high' },
+      actualParamsList: [{ size: '1536x1024', quality: 'high' }],
+      revisedPrompts: ['改写提示词'],
+    })
+  })
+
+  it('Images API 普通文本增量仍保持缺少最终图片错误', async () => {
+    const streamBody = [
+      'data: {"type":"response.output_text.delta","delta":"图片生成处理中"}',
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n')
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(streamBody, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }))
+
+    await expect(callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        streamImages: true,
+        profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
+          ...profile,
+          apiKey: 'test-key',
+          streamImages: true,
+        })),
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+    } as any)).rejects.toThrow('流式接口未返回最终图片数据')
+  })
+
+  it('Images API 不把未知事件 result 中的长错误文本当作图片', async () => {
+    const streamBody = [
+      `data: ${JSON.stringify({ type: 'provider.error', result: '接口返回了无法处理的错误信息。'.repeat(20) })}`,
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n')
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(streamBody, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }))
+
+    await expect(callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        streamImages: true,
+        profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
+          ...profile,
+          apiKey: 'test-key',
+          streamImages: true,
+        })),
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+    } as any)).rejects.toThrow('流式接口未返回最终图片数据')
+  })
+
+  it('Images API 只有中间图时不把中间图当作最终结果', async () => {
+    const partialB64 = FALLBACK_IMAGE_BASE64
+    const streamBody = [
+      `data: ${JSON.stringify({ type: 'image_generation.partial_image', partial_image_index: 0, b64_json: partialB64 })}`,
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n')
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(streamBody, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }))
+
+    await expect(callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        streamImages: true,
+        profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
+          ...profile,
+          apiKey: 'test-key',
+          streamImages: true,
+        })),
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+    } as any)).rejects.toThrow('流式接口未返回最终图片数据')
+  })
+
   it('splits Images API streaming into concurrent single-image requests when n is greater than 1', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       const streamBody = [
@@ -500,6 +732,48 @@ describe('callImageApi', () => {
       actualParams: { size: '1024x1024' },
       actualParamsList: [{ size: '1024x1024' }],
       revisedPrompts: ['rewritten'],
+    })
+  })
+
+  it.each([
+    ['JSON', (b64: string) => JSON.stringify({ result: b64 })],
+    ['Data URL', (b64: string) => `data:image/png;base64,${b64}`],
+    ['使用请求输出格式 MIME 的纯 Base64', (b64: string) => b64],
+  ])('兼容 Responses API 的 response.output_text.delta %s 图片文本', async (_, createText) => {
+    const b64 = FALLBACK_IMAGE_BASE64
+    const text = createText(b64)
+    const streamBody = [text.slice(0, 23), text.slice(23)].flatMap((delta) => [
+      `data: ${JSON.stringify({ type: 'response.output_text.delta', delta })}`,
+      '',
+    ]).concat(['data: [DONE]', '']).join('\n')
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(streamBody, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }))
+
+    const result = await callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        apiMode: 'responses',
+        streamImages: true,
+        profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
+          ...profile,
+          apiKey: 'test-key',
+          apiMode: 'responses',
+          streamImages: true,
+        })),
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+    } as any)
+
+    expect(result).toMatchObject({
+      images: [`data:image/png;base64,${b64}`],
+      actualParams: {},
+      actualParamsList: [{}],
+      revisedPrompts: [undefined],
     })
   })
 

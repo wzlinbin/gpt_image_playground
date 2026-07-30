@@ -23,6 +23,9 @@ import {
 import { isEventStreamResponse, readJsonServerSentEvents } from './serverSentEvents'
 
 const PROMPT_REWRITE_GUARD_PREFIX = 'Use the following text as the complete prompt. Do not rewrite it:'
+const FALLBACK_IMAGE_KEYS = new Set(['b64_json', 'base64', 'image_base64', 'partial_image_b64', 'result'])
+const FALLBACK_BASE64_IMAGE_PREFIXES = ['iVBORw0KGgo', '/9j/', 'UklGR']
+const MIN_FALLBACK_BASE64_LENGTH = 100
 
 function getStreamPartialImages(profile: ApiProfile): number {
   return profile.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES
@@ -106,6 +109,70 @@ function getErrorMessage(err: unknown): string {
 function getNumberValue(source: Record<string, unknown>, key: string): number | undefined {
   const value = source[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function isFallbackBase64Image(value: string): boolean {
+  if (value.length <= MIN_FALLBACK_BASE64_LENGTH) return false
+  if (/^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(value)) return true
+  const compact = value.replace(/\s+/g, '')
+  return compact.length % 4 === 0 &&
+    /^[A-Za-z0-9+/]+={0,2}$/.test(compact) &&
+    FALLBACK_BASE64_IMAGE_PREFIXES.some((prefix) => compact.startsWith(prefix))
+}
+
+function collectFallbackBase64Images(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap((item) => collectFallbackBase64Images(item))
+  if (!isRecordValue(value)) return []
+
+  return Object.entries(value).flatMap(([key, item]) => {
+    if (FALLBACK_IMAGE_KEYS.has(key) && typeof item === 'string' && isFallbackBase64Image(item)) {
+      return [item]
+    }
+    return collectFallbackBase64Images(item)
+  })
+}
+
+function getOutputTextDelta(event: Record<string, unknown>): string | null {
+  return event.type === 'response.output_text.delta' && typeof event.delta === 'string' ? event.delta : null
+}
+
+function extractFallbackBase64ImagesFromText(text: string): string[] {
+  const trimmed = text.trim()
+  if (!trimmed) return []
+
+  try {
+    const images = collectFallbackBase64Images(JSON.parse(trimmed))
+    if (images.length) return images
+  } catch {
+    // 文本增量也可能直接组成 Data URL 或纯 Base64，继续按这两种格式检查。
+  }
+
+  const images = Array.from(trimmed.matchAll(/data:image\/[a-zA-Z0-9.+-]+;base64,([A-Za-z0-9+/=\s]+)/g))
+    .map((match) => match[1].replace(/\s+/g, ''))
+  if (images.length) return images
+
+  const compact = trimmed.replace(/\s+/g, '')
+  // 与 Python 的 validate=True 行为一致，纯 Base64 必须包含合法填充并按 4 字节对齐。
+  if (
+    compact.length <= MIN_FALLBACK_BASE64_LENGTH ||
+    compact.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(compact) ||
+    !FALLBACK_BASE64_IMAGE_PREFIXES.some((prefix) => compact.startsWith(prefix))
+  ) return images
+  return [...images, compact]
+}
+
+function createFallbackStreamResult(images: string[], textDeltas: string[], mime: string): CallApiResult | null {
+  const textImages = extractFallbackBase64ImagesFromText(textDeltas.join(''))
+  // 文本增量在生成流程末尾组装为最终图片，应优先于早先未知事件中的图片候选。
+  const image = textImages[textImages.length - 1] ?? images[images.length - 1]
+  if (!image) return null
+  return {
+    images: [normalizeBase64Image(image, mime)],
+    actualParams: {},
+    actualParamsList: [{}],
+    revisedPrompts: [undefined],
+  }
 }
 
 function getStreamEventErrorMessage(event: Record<string, unknown>): string | null {
@@ -279,6 +346,8 @@ async function parseImagesApiStreamResponse(
   onPartialImage?: CallApiOptions['onPartialImage'],
 ): Promise<CallApiResult> {
   const completedItems: ImageResponseItem[] = []
+  const fallbackImages: string[] = []
+  const textDeltas: string[] = []
   let resultPayload: ImageApiResponse | null = null
 
   await readJsonServerSentEvents(response, (event) => {
@@ -302,7 +371,12 @@ async function parseImagesApiStreamResponse(
 
     if (type === 'image_generation.completed' || type === 'image_edit.completed') {
       completedItems.push(eventToImageResponseItem(event))
+      return
     }
+
+    fallbackImages.push(...collectFallbackBase64Images(event))
+    const textDelta = getOutputTextDelta(event)
+    if (textDelta != null) textDeltas.push(textDelta)
   }, {
     formatErrorMessage: appendStreamingFormatHint,
     getEventErrorMessage: getStreamEventErrorMessage,
@@ -312,6 +386,9 @@ async function parseImagesApiStreamResponse(
     return parseImagesApiResponse(resultPayload, mime)
   }
 
+  const fallbackResult = createFallbackStreamResult(fallbackImages, textDeltas, mime)
+  if (!completedItems.length && fallbackResult) return fallbackResult
+
   if (!completedItems.length) {
     throw new Error('流式接口未返回最终图片数据')
   }
@@ -320,7 +397,18 @@ async function parseImagesApiStreamResponse(
     .map((item) => item.b64_json)
     .filter((b64): b64 is string => Boolean(b64))
     .map((b64) => normalizeBase64Image(b64, mime))
-  if (!images.length) throw new Error('流式接口未返回可用图片数据')
+  if (!images.length) {
+    if (fallbackResult) {
+      const actualParams = mergeActualParams(pickActualParams(completedItems[0]))
+      return {
+        ...fallbackResult,
+        actualParams,
+        actualParamsList: [actualParams],
+        revisedPrompts: [completedItems[0].revised_prompt],
+      }
+    }
+    throw new Error('流式接口未返回可用图片数据')
+  }
 
   const actualParamsList = completedItems.map((item) => mergeActualParams(pickActualParams(item)))
   const actualParams = mergeActualParams(
@@ -354,6 +442,8 @@ async function parseResponsesApiStreamResponse(
 ): Promise<CallApiResult> {
   let completedPayload: ResponsesApiResponse | null = null
   const outputItems: ResponsesOutputItem[] = []
+  const fallbackImages: string[] = []
+  const textDeltas: string[] = []
 
   await readJsonServerSentEvents(response, (event) => {
     const type = getStringValue(event, 'type')
@@ -369,28 +459,40 @@ async function parseResponsesApiStreamResponse(
     }
 
     const payload = getResponsesStreamPayload(event)
-    if (!payload) return
+    if (payload) {
+      if (type === 'response.output_item.done' && Array.isArray(payload.output)) {
+        outputItems.push(...payload.output)
+        return
+      }
 
-    if (type === 'response.output_item.done' && Array.isArray(payload.output)) {
-      outputItems.push(...payload.output)
+      completedPayload = payload
       return
     }
 
-    completedPayload = payload
+    fallbackImages.push(...collectFallbackBase64Images(event))
+    const textDelta = getOutputTextDelta(event)
+    if (textDelta != null) textDeltas.push(textDelta)
   }, {
     formatErrorMessage: appendStreamingFormatHint,
     getEventErrorMessage: getStreamEventErrorMessage,
   })
 
+  const fallbackResult = createFallbackStreamResult(fallbackImages, textDeltas, mime)
   const payload = completedPayload ?? (outputItems.length ? { output: outputItems } : null)
-  if (!payload) throw new Error('流式接口未返回最终图片数据')
+  if (!payload) {
+    if (fallbackResult) return fallbackResult
+    throw new Error('流式接口未返回最终图片数据')
+  }
 
   let imageResults: ReturnType<typeof parseResponsesImageResults>
   try {
     imageResults = parseResponsesImageResults(payload, mime)
   } catch (err) {
     const collectedImageItems = outputItems.filter((item) => getResponsesImageResultBase64(item.result))
-    if (collectedImageItems.length === 0) throw err
+    if (collectedImageItems.length === 0) {
+      if (fallbackResult) return fallbackResult
+      throw err
+    }
     imageResults = parseResponsesImageResults({ output: collectedImageItems }, mime)
   }
   const actualParams = mergeActualParams(imageResults[0]?.actualParams ?? {})

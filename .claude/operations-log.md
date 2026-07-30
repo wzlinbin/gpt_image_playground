@@ -687,3 +687,93 @@ Playwright 连续三次未完成，按规则暂停验证并回到验收设计复
 - 在目标 Worker 的“设置 → 变量和密钥”中添加 README 所列 12 个文本变量并点击“部署”。
 - 代码部署使用 `keep_vars: true` 保留后台变量；本次未执行真实 Cloudflare 部署。
 - 本地 8792 预览使用等价变量模拟 CF 后台配置，便于直接核验。
+
+## api2cn 流式图片兼容
+
+### 需求分析与工具链记录
+
+时间：2026-07-30 09:42:00 +08:00
+
+- 目标：将 `generate_image_api2cn.py` 已验证的流式文本/Base64 提取方法移植到系统，同时不改变现有图片生成协议的优先路径。
+- `sequential-thinking`、`shrimp-task-manager`、`desktop-commander`、Context7 和 `github.search_code` 在当前会话没有可调用入口。
+- 补偿措施：使用计划工具模拟任务管理，使用 PowerShell/`rg`/Git 完成本地分析，读取三个以上相似实现，访问 OpenAI 官方图片文档，并尝试 GitHub REST Code Search。
+- GitHub REST Code Search 返回 401，未取得开源样例；采用本地 Python 实测实现作为第三方协议依据。
+- 已按 `openai-docs` 技能注册 `openaiDeveloperDocs`，当前会话无法热加载；官方页面访问成功，第三方事件格式不冒充官方协议。
+
+### 编码前检查 - api2cn 流式图片兼容
+
+时间：2026-07-30 09:42:00 +08:00
+
+- 已查阅上下文摘要：`.claude/context-summary-api2cn-streaming.md`。
+- 将复用 `readJsonServerSentEvents`：位于 `src/lib/serverSentEvents.ts`，用于 SSE 分块读取。
+- 将复用 `normalizeBase64Image`：位于 `src/lib/imageApiShared.ts`，用于统一图片 Data URL。
+- 将复用 `mergeActualParams` 与 `pickActualParams`：保持现有 `CallApiResult` 协议。
+- 将遵循 camelCase/UPPER_SNAKE_CASE、2 空格、单引号、无分号和早返回风格。
+- 确认不重复造轮子：已检查 Images 流、Responses 流、公共 SSE 工具、Python 解析器及 `api.test.ts`，只在现有解析器内增加共享回退纯函数。
+
+### 验收契约
+
+- 标准 Images/Responses 最终事件继续优先。
+- 支持 `response.output_text.delta` 拼接 JSON、Data URL 和纯 Base64。
+- 支持 Python 脚本的五类递归图片字段。
+- 普通文本不误判，缺图错误保持可见。
+- 定向测试、完整测试、构建和差异检查必须全部通过；任一失败立即修复后重跑。
+
+### 编码中监控
+
+- 复用检查：已使用 `readJsonServerSentEvents`、`normalizeBase64Image`、`mergeActualParams` 和 `pickActualParams`，没有新增请求器或 SSE 框架。
+- 命名检查：新增函数均为 camelCase，模块常量为 UPPER_SNAKE_CASE。
+- 风格检查：保持 2 空格、单引号、无分号、早返回；代码注释和测试描述使用简体中文。
+- 第一次实现审阅发现 ES2020 不支持 `Array.at`，已在定向测试前改为下标读取。
+- 第一次定向测试通过后发现标准中间图可能被宽松候选误用，已将标准 partial 事件保持在回退收集之前早返回，并新增防回归测试。
+
+### Claude Code 独立审查与整改
+
+- 第一次审查设置的 `0.50 USD` 上限不足，进程以预算超限结束，没有产出结论。
+- 第二次审查：综合 79，未达到仓库阈值。已整改标准事件 Base64 重复进入回退数组、Responses 测试缺口、Base64 填充说明和文本图片优先级说明。
+- 第三次审查：综合 78，结论退回。已取消无必要的递归 delta 搜索、校验宽泛 `result` 字段、让 Data URL 明确优先、保留空 completed 的参数元数据，并补充优先级与错误文本测试。
+- 第四次审查：综合 85，未通过。报告中的 Images partial 未早返回与实际代码不符，已有对应长 Base64 防回归测试；有效建议是统一纯回退元数据。进一步增加 PNG/JPEG/WebP 文件签名校验，并统一 `actualParams`、`actualParamsList`、`revisedPrompts`。
+- 一次最终复核因 Claude API `Invalid signature in thinking block` 失败，重新建立简化只读会话补偿。
+- 最终独立审查：技术评分 93，战略评分 94，综合评分 93，结论“通过”。
+
+### 编码后声明 - api2cn 流式图片兼容
+
+时间：2026-07-30 10:27:00 +08:00
+
+1. 复用了以下既有组件
+
+- `readJsonServerSentEvents`：继续负责 SSE 分块和错误事件，不新增平行解析框架。
+- `normalizeBase64Image`：统一裸 Base64 与 Data URL 输出。
+- `mergeActualParams`、`pickActualParams`：空 completed 外壳回退时保留实际参数。
+- `api.test.ts` 的内存 `Response` 模式：全部新增测试不访问真实网络。
+
+2. 遵循了以下项目约定
+
+- 命名使用 camelCase 和 UPPER_SNAKE_CASE，代码为 2 空格、单引号、无分号。
+- 新增逻辑位于 `src/lib/openaiCompatibleImageApi.ts`，没有扩大 `store.ts` 或配置层。
+- 新增测试描述和注释均为简体中文，没有新增依赖、脚本或配置。
+
+3. 对比了以下相似实现
+
+- Images API 标准流：标准 partial/result/completed 事件始终优先并早返回。
+- Responses API 标准流：标准 partial/output item/completed 事件始终优先并早返回。
+- Python api2cn 解析：复用五类图片字段、文本增量拼接、JSON/Data URL/纯 Base64 提取和最后图片候选行为。
+- 公共 SSE 工具：保持传输层错误和 JSON 解析职责不变。
+
+4. 未重复造轮子的证明
+
+- 已检查 `openaiCompatibleImageApi.ts`、`serverSentEvents.ts`、`imageApiShared.ts`、`api.test.ts` 和 `generate_image_api2cn.py`。
+- 新增代码只负责既有流事件回调中的兼容候选提取，没有新增请求协议、状态层、配置项或外部依赖。
+
+### 最终本地验证
+
+- `npm test -- src/lib/api.test.ts src/lib/serverSentEvents.test.ts`：通过，2 个文件、49 个用例。
+- `npm test`：通过，33 个文件、418 个用例。
+- `npm run build`：通过，TypeScript 编译和 Vite 601 个模块构建成功；仅有既有大包体积提示。
+- `git diff --check`：通过，仅有 Windows 换行转换提示。
+- 真实第三方响应协议来自 `image2` 的既有实测记录；新增测试逐事件复现相同 SSE 结构，不额外消耗生图额度。
+
+### 迁移与回滚
+
+- 无配置或数据迁移：现有 Base URL、API Key、Images/Responses 模式、流式和 Base64 开关保持不变。
+- 回滚只需还原 `src/lib/openaiCompatibleImageApi.ts` 和 `src/lib/api.test.ts` 的本次差异；不涉及 IndexedDB、store 或用户数据。
