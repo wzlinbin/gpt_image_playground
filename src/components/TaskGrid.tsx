@@ -11,6 +11,7 @@ export default function TaskGrid() {
   const activeFavoriteCollectionId = useStore((s) => s.activeFavoriteCollectionId)
   const defaultFavoriteCollectionId = useStore((s) => s.defaultFavoriteCollectionId)
   const setDetailTaskId = useStore((s) => s.setDetailTaskId)
+  const setLightboxImageId = useStore((s) => s.setLightboxImageId)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const selectedTaskIds = useStore((s) => s.selectedTaskIds)
   const setSelectedTaskIds = useStore((s) => s.setSelectedTaskIds)
@@ -301,6 +302,11 @@ export default function TaskGrid() {
                 const isCtrl = isMac ? e.metaKey : e.ctrlKey
                 if (isCtrl) {
                   useStore.getState().toggleTaskSelection(task.id)
+                  return
+                }
+
+                if (e.target instanceof Element && e.target.closest('[data-task-image-preview]') && task.outputImages.length > 0) {
+                  setLightboxImageId(task.outputImages[0], task.outputImages)
                   return
                 }
 

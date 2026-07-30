@@ -857,3 +857,235 @@ Playwright 连续三次未完成，按规则暂停验证并回到验收设计复
 - 检查 `git ls-remote origin refs/heads/main` 已确认远端写入发生。未执行强制推送、回退或历史改写，避免在未获得用户授权时产生第二次远端破坏性操作。
 - 后续仅在本地补充最终审查报告和本事件记录，不再执行任何远端写入。
 - 原回滚分支 `backup/pre-upstream-v0.7.2-20260730` 仍指向 `05dee21`，两个 stash 均保留。
+## 点击图片打开完整分辨率大图
+
+### 需求分析与工具记录
+
+时间：2026-07-30 12:42:34 +08:00
+
+- 用户要求点击图片后直接显示完整分辨率大图，不需要缩略图式弹窗。
+- 已确认列表 `TaskCard` 使用最长边 720px 的缩略图；`DetailModal` 与 `Lightbox` 均使用原图缓存，其中只有 Lightbox 提供全屏大图体验。
+- 依赖链为 `TaskGrid -> TaskCard -> useStore.setLightboxImageId -> Lightbox -> imageCache -> db.images`；输入是点击目标与 `task.outputImages`，输出是 Lightbox 或详情状态。
+- 指定的 `sequential-thinking`、`shrimp-task-manager`、`desktop-commander`、Context7、GitHub 代码搜索和 Claude Code 审查工具未提供；使用计划工具、PowerShell、`rg`、Git 历史、本地 Vitest、构建和浏览器自动化补偿。
+
+### 编码前检查 - 点击图片打开完整分辨率大图
+
+- [x] 已查阅上下文摘要文件：`.claude/context-summary-full-image-popup.md`
+- [x] 将复用 `setLightboxImageId`：`src/store.ts`，用于传递原图 ID 与多图导航列表。
+- [x] 将复用 `Lightbox` 和 `ensureImageCached`：用于全屏展示 IndexedDB 中的原始 Data URL。
+- [x] 将保留 `TaskCard` 的缩略图加载：列表继续避免解码完整高分辨率图片。
+- [x] 将遵循 camelCase/PascalCase、2 空格、单引号、无分号和早返回风格。
+- [x] 已检查 `TaskCard.tsx`、`DetailModal.tsx`、`Lightbox.tsx`、`imageCache.ts` 和 `db.ts`，确认无需新增查看器或原图加载函数。
+
+### 验收契约
+
+- 点击已完成任务的图片预览区域，直接打开首张输出原图的 Lightbox，并保留同任务多图导航。
+- 点击任务卡片的非图片区域，继续打开任务详情。
+- 无输出图片时不尝试打开 Lightbox，继续进入详情查看运行或错误状态。
+- 列表继续使用缩略图，弹出大图只使用原图读取链路。
+- 定向测试、全量测试、构建和浏览器交互验证必须全部通过。
+
+### 编码中监控
+
+时间：2026-07-30 12:48:53 +08:00
+
+- `TaskCard` 沿用现有 DOM 结构，只为整块左侧预览容器增加 `data-task-image-preview`，没有改变缩略图加载和样式。
+- `TaskGrid` 继续优先处理 Ctrl/⌘ 多选；仅当点击目标位于图片预览容器且任务含输出图时，调用既有 `setLightboxImageId`。
+- 点击图片上的比例、尺寸等覆盖元素也能通过 `closest` 识别；无输出图和非图片区域继续走 `setDetailTaskId`。
+- 命名和格式遵循既有 camelCase、2 空格、单引号、无分号；实现没有新增函数、状态、依赖或配置。
+
+### 编码后声明 - 点击图片打开完整分辨率大图
+
+时间：2026-07-30 12:48:53 +08:00
+
+1. 复用了 `setLightboxImageId`、`Lightbox`、`ensureImageCached` 和 `task.outputImages`，分别用于弹窗状态、全屏交互、原图读取和多图导航。
+2. 遵循现有文件职责：卡片 DOM 标记在 `TaskCard.tsx`，点击路由在 `TaskGrid.tsx`，原图读取保持在 `Lightbox.tsx` / `imageCache.ts`。
+3. 对比 `TaskCard` 缩略图、`DetailModal` 原图预览和 `Lightbox` 全屏原图三种实现；本次只改变首击入口，不复制任何图片加载逻辑。
+4. 已检查 `imageCache.ts`、`db.ts` 和相关测试，确认原图与缩略图存储分离，不存在需要新增的同类功能。
+
+### 最终本地验证
+
+- `npm test -- src/components/TaskGrid.test.tsx src/lib/imageCache.test.ts`：通过，2 个文件、9 个用例。
+- `npm test`：通过，34 个文件、435 个用例。
+- `npm run build`：通过，TypeScript 编译和 Vite 601 个模块构建成功；仅有既有大包体积提示。
+- `git diff --check`：通过，仅有 Windows 换行转换提示。
+- 开发服务器：`http://127.0.0.1:5174/` 返回 HTTP 200，页面根节点存在。
+- 浏览器控制运行时和项目 Playwright 依赖均未提供，无法执行截图级点击验证；已用 jsdom 组件测试覆盖真实冒泡目标、覆盖层点击、详情回退和无输出图边界，并在验证报告中记录该限制。
+
+### 迁移与回滚
+
+- 无配置、API 或 IndexedDB 数据迁移；既有原图和缩略图记录无需重建。
+- 回滚只需还原 `TaskCard.tsx` 的预览区标记与 `TaskGrid.tsx` 的点击分流，并删除对应新增测试；不影响用户图片或任务数据。
+
+## Lightbox 原始像素比例
+
+> 状态：已被后续“Lightbox 原图屏幕适配”方案取代，仅保留为需求演变记录。
+
+### 需求澄清与工具记录
+
+时间：2026-07-30 12:57:54 +08:00
+
+- 用户澄清：问题不只是弹窗是否读取原图，而是图片仍被缩小；要求 Lightbox 的 100% 显示比例对应图片固有像素尺寸。
+- 根因是 `Lightbox.tsx` 使用 `max-w-[90vw] max-h-[70vh]` 等 CSS 上限，并将适应视口后的尺寸当作 `scale = 1`。
+- 当前环境未提供指定的 sequential-thinking、任务管理、文件分析、文档检索和独立审查工具；继续使用计划工具、PowerShell、`rg` 和全套本地验证补偿。
+
+### 编码前检查 - Lightbox 原始像素比例
+
+- [x] 已查阅 `.claude/context-summary-lightbox-native-scale.md`。
+- [x] 将复用 `Lightbox` 现有 `scaleRef`、平移、鼠标、触控和倍率徽标。
+- [x] 将复用 `MaskEditorModal` 的视口裁剪 + 内部平移交互原则。
+- [x] 将遵循 camelCase、2 空格、单引号、无分号和既有 hook/ref 风格。
+- [x] 已检查 `Lightbox.tsx`、`DetailModal.tsx`、`MaskEditorModal.tsx` 和 `viewportTransform.test.ts`，确认不存在可直接替换的原始尺寸 Lightbox。
+
+### 验收契约
+
+- 图片元素取消视口最大宽高限制，以固有宽高作为 100% 基准。
+- 原图大于视口时，倍率为 100% 也可以通过鼠标和单指拖拽查看超出部分。
+- 原图小于视口时保持居中，不启用无意义平移。
+- Lightbox 根容器裁剪大图溢出，不产生页面滚动条。
+- 定向测试、全量测试、生产构建和空白检查必须全部通过。
+
+### 编码中监控
+
+时间：2026-07-30 13:03:05 +08:00
+
+- 复用现有 `scaleRef`，没有另建“适应视口倍率”；删除图片视口上限后，`scale = 1` 直接对应固有尺寸。
+- 新增 `imageRef` 和 `canPanImage`，只在当前倍率大于 1 或固有尺寸超出视口时允许平移。
+- 鼠标、单指触控、点击关闭和横滑切图统一使用同一可平移判断，避免不同输入方式行为分叉。
+- Lightbox 根层增加 `overflow-hidden`，大图超出区域由平移查看，不扩张页面布局。
+- 命名、hook/ref 使用、2 空格、单引号和无分号均与原文件一致；未新增依赖、store 字段或配置。
+
+### 编码后声明 - Lightbox 原始像素比例
+
+时间：2026-07-30 13:03:05 +08:00
+
+1. 复用了 `Lightbox` 的原图读取、缩放、平移、触控和导航能力，没有新增并行查看器。
+2. 遵循原文件用 ref 保存高频变换、用 state 触发显示更新的模式；窗口变化和图片加载只触发轻量重渲染。
+3. 对比了原 Lightbox 的适应视口、MaskEditor 的视口裁剪平移和 viewportTransform 的 100% 变换测试模式。
+4. 已检查组件、缓存与数据库链路，确认本次问题只在展示尺寸约束，不修改原图数据或缩略图策略。
+
+### 最终本地验证
+
+- `npm test -- src/components/Lightbox.test.tsx src/components/TaskGrid.test.tsx src/lib/imageCache.test.ts`：通过，3 个文件、11 个用例。
+- `npm test`：通过，35 个文件、437 个用例。
+- `npm run build`：通过，TypeScript 编译和 Vite 601 个模块构建成功；仅有既有大包体积提示。
+- 构建 CSS 检查：`max-w-none`、`max-h-none` 和 `overflow-hidden` 均存在于最终 CSS。
+- 开发服务器检查：`http://127.0.0.1:5174/src/components/Lightbox.tsx` 返回 200，包含新原始尺寸与平移逻辑。
+- `git diff --check`：通过，仅有 Windows 换行转换提示。
+- 浏览器控制运行时仍不可用，未生成截图；jsdom 通过实际 DOM 固有尺寸、视口矩形、鼠标事件和 transform 结果验证大图/小图行为。
+
+### 迁移与回滚
+
+- 无配置、API 或数据迁移；用户原图、缩略图和任务记录保持不变。
+- 回滚只需还原 `src/components/Lightbox.tsx` 并删除 `src/components/Lightbox.test.tsx`；此前图片点击直接进入 Lightbox 的改动可独立保留。
+
+## Lightbox 原图屏幕适配
+
+### 需求澄清与编码前检查
+
+时间：2026-07-30 13:11:31 +08:00
+
+- 用户确认大图不应超出屏幕；最终目标是“读取完整原图，但初始显示限制在屏幕内”，而不是按固有像素尺寸直接铺开。
+- 已查阅 `.claude/context-summary-lightbox-viewport-fit.md`，对比 Lightbox 原图加载、当前固有尺寸展示、DetailModal 等比适配和 MaskEditor 视口裁剪。
+- 将复用 `ensureImageCached`、现有缩放和平移逻辑；只调整初始 CSS 尺寸与 100% 时的手势状态。
+- 将遵循 camelCase、2 空格、单引号、无分号和现有 refs/effects 风格，不新增依赖或数据路径。
+- 指定专用工具仍未提供，继续使用计划工具、本地检索和完整自动验证补偿。
+
+### 验收契约
+
+- 原图 Data URL 来源不变，任务卡片缩略图不得进入 Lightbox。
+- 初始图片宽高均不超过动态视口减去安全间距，且保持原图比例。
+- 初始状态点击图片可按既有行为关闭，横滑导航可用，不启用拖拽。
+- 主动放大后继续支持鼠标、触控平移和倍率复位。
+- 定向测试、全量测试、生产构建、构建 CSS 和空白检查全部通过。
+
+### 编码中监控
+
+时间：2026-07-30 13:15:00 +08:00
+
+- 原图读取仍使用 `ensureImageCached`，未回退到卡片缩略图。
+- 图片使用 `width/height: auto`、`object-contain` 和动态视口最大宽高；移动端保留 32px、桌面端保留 64px 安全间距。
+- `scale = 1` 恢复为完整适应屏幕状态，鼠标和触控仅在主动放大后启用平移。
+- 根容器继续使用 `overflow-hidden`，双重保证页面不会被大图撑出滚动范围。
+- 实现沿用原 Lightbox refs/effects，不新增依赖、store 字段、配置或数据 I/O。
+
+### 编码后声明 - Lightbox 原图屏幕适配
+
+时间：2026-07-30 13:15:00 +08:00
+
+1. 复用了 `ensureImageCached`、Lightbox 现有缩放/平移/导航和 `object-contain` 等比展示模式。
+2. 遵循现有组件职责和代码风格，尺寸策略只保留在图片元素，不引入新工具模块。
+3. 对比了 Lightbox 原适应视口、上一版固有尺寸铺开、DetailModal 容器适配和 MaskEditor 视口裁剪。
+4. 已确认原图与缩略图缓存仍分离，本次仅改变 CSS 展示边界，不重复实现图片加载。
+
+### 最终本地验证
+
+- 定向测试：3 个文件、11 个用例全部通过。
+- 全量测试：35 个文件、437 个用例全部通过。
+- `npm run build`：通过，TypeScript 与 Vite 601 个模块构建成功；仅有既有大包体积提示。
+- 构建 CSS：移动/桌面的 `100vw`、`100dvh` 减安全间距规则全部存在。
+- 开发服务器：更新后的 Lightbox 源码返回 HTTP 200，并继续包含 `ensureImageCached` 原图加载。
+- `git diff --check`：通过，仅有 Windows 换行转换提示。
+- 浏览器自动化运行时未提供，未生成截图；jsdom 已验证原图 URL、屏幕约束类、初始无平移和放大后拖拽。
+
+### 迁移与回滚
+
+- 无配置、API 或数据迁移，原图与任务数据保持不变。
+- 回滚只需还原 `Lightbox.tsx` 的图片尺寸类和对应测试；点击卡片直接打开原图的入口可独立保留。
+
+## Lightbox 原图下载按钮
+
+### 需求分析与编码前检查
+
+时间：2026-07-30 13:32:49 +08:00
+
+- 目标是在 Lightbox 原图右上角添加深色下载图标按钮，下载当前完整原图。
+- 已查阅 `.claude/context-summary-lightbox-download.md`，分析 DetailModal 当前图下载、右键菜单命名、TooltipButton 和 downloadImages 原图链路。
+- 将复用 `downloadImageIds`、`DownloadIcon`、`TooltipButton` 和 store `showToast`，不新增下载实现。
+- 下载动作使用当前 `lightboxImageId`；任务输出使用 `task-{taskId}`，其他图片使用 `image-{imageId}` 文件名。
+- 按钮位于图片布局容器右上角但在缩放变换容器之外，点击需与关闭和拖拽隔离。
+- 将遵循 camelCase、2 空格、单引号、无分号和既有组件 props 风格。
+- 指定专用工具仍未提供，使用计划工具、本地检索和完整自动验证补偿。
+
+### 验收契约
+
+- Lightbox 图片右上角显示带“下载原图”辅助标签和提示的图标按钮。
+- 点击按钮调用 `downloadImageIds` 下载当前原图，成功/失败 Toast 正确。
+- 下载过程中按钮禁用，防止重复触发。
+- 点击或按下按钮不关闭 Lightbox，不触发缩放图片拖拽。
+- 按钮不位于 transform 容器内，不随图片缩放。
+- 定向测试、全量测试、生产构建、开发服务器和空白检查全部通过。
+
+### 编码中监控
+
+时间：2026-07-30 13:43:38 +08:00
+
+- 下载动作位于 Lightbox 外层，复用当前 `lightboxImageId`、任务列表和 `showToast`；内部组件只接收下载状态与回调。
+- 按钮使用既有 `TooltipButton` 和 `DownloadIcon`，视觉为 28px 半透明黑色方形按钮，固定在图片右上角。
+- 按钮是 transform 图片层的兄弟元素，不会随图片缩放；根层 mousedown 明确忽略 button，放大状态下仍可点击。
+- `downloading` 防止重复下载，成功、零成功结果和异常均有中文 Toast。
+- 未新增依赖、配置、store 字段或下载数据路径，命名与格式符合项目约定。
+
+### 编码后声明 - Lightbox 原图下载按钮
+
+时间：2026-07-30 13:43:38 +08:00
+
+1. 复用了 `downloadImageIds`、`DownloadIcon`、`TooltipButton` 和 store `showToast`。
+2. 遵循 Lightbox 外层负责数据、内部组件负责展示的既有职责，不向 store 或新模块扩散逻辑。
+3. 对比 DetailModal 当前图下载、ImageContextMenu 文件命名和 AgentWorkspace 下载反馈，保持一致行为。
+4. 已检查 `downloadImages.ts` 和 `imageCache.ts`，确认按钮下载原图 Blob，不使用缩略图或重复实现扩展名处理。
+
+### 最终本地验证
+
+- 定向测试：3 个文件、13 个用例全部通过。
+- 全量测试：35 个文件、439 个用例全部通过。
+- `npm run build`：通过，TypeScript 与 Vite 601 个模块构建成功；仅有既有大包体积提示。
+- 构建 CSS：按钮尺寸、半透明背景和右上角定位规则全部存在。
+- 开发服务器：Lightbox 源码返回 HTTP 200，包含下载标签、统一下载工具和屏幕适配逻辑。
+- `git diff --check`：通过，仅有 Windows 换行转换提示。
+- 浏览器自动化运行时未提供，未生成截图；jsdom 已验证按钮位置层级、成功/失败、原图 ID 和弹窗保持打开。
+
+### 迁移与回滚
+
+- 无配置、API 或数据迁移。
+- 回滚只需移除 Lightbox 下载状态、回调、按钮和对应测试；原图打开与屏幕适配功能可独立保留。

@@ -5,9 +5,11 @@ import { useHintTooltip } from '../hooks/useHintTooltip'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import { suppressGlobalClicks } from '../lib/clickSuppression'
+import { downloadImageIds } from '../lib/downloadImages'
 import { ensureImageCached, getCachedImage } from '../lib/imageCache'
+import { TooltipButton } from './TooltipButton'
 import ButtonTooltip from './input/buttonTooltip'
-import { EditIcon, RefreshIcon } from './icons'
+import { DownloadIcon, EditIcon, RefreshIcon } from './icons'
 
 const MIN_SCALE = 1
 const MAX_SCALE = 10
@@ -38,6 +40,7 @@ export default function Lightbox() {
   const [src, setSrc] = useState('')
   const [maskImageSrc, setMaskImageSrc] = useState('')
   const [maskPreviewSrc, setMaskPreviewSrc] = useState('')
+  const [downloading, setDownloading] = useState(false)
 
   const close = useCallback(() => setLightboxImageId(null), [setLightboxImageId])
   useCloseOnEscape(Boolean(lightboxImageId), close)
@@ -194,6 +197,23 @@ export default function Lightbox() {
     setMaskEditorImageId(imageId)
   }, [close, isInputImage, lightboxImageId, setMaskEditorImageId])
 
+  const downloadCurrentImage = useCallback(async () => {
+    if (!lightboxImageId || downloading) return
+    setDownloading(true)
+
+    try {
+      const matchedTask = tasks.find((task) => task.outputImages.includes(lightboxImageId))
+      const fileNameBase = matchedTask ? `task-${matchedTask.id}` : `image-${lightboxImageId}`
+      const result = await downloadImageIds([lightboxImageId], fileNameBase)
+      showToast(result.successCount > 0 ? '下载成功' : '下载失败', result.successCount > 0 ? 'success' : 'error')
+    } catch (err) {
+      console.error(err)
+      showToast('下载失败', 'error')
+    } finally {
+      setDownloading(false)
+    }
+  }, [downloading, lightboxImageId, showToast, tasks])
+
   // 键盘左右切换
   useEffect(() => {
     if (!lightboxImageId || !showNav) return
@@ -223,6 +243,8 @@ export default function Lightbox() {
         editDisabled={Boolean(maskDraft && maskDraft.targetImageId !== lightboxImageId)}
         onReplace={openReplaceFilePicker}
         onEdit={editInputImage}
+        downloading={downloading}
+        onDownload={downloadCurrentImage}
       />
       <input
         ref={replaceFileInputRef}
@@ -249,10 +271,12 @@ interface LightboxInnerProps {
   editDisabled: boolean
   onReplace: () => void
   onEdit: () => void
+  downloading: boolean
+  onDownload: () => void
 }
 
 /** 内部组件：保证挂载时 DOM 已经存在，所有 ref / effect 都可靠 */
-function LightboxInner({ src, imageId, maskPreviewSrc, onClose, showNav, currentIndex, total, onPrev, onNext, showInputActions, editDisabled, onReplace, onEdit }: LightboxInnerProps) {
+function LightboxInner({ src, imageId, maskPreviewSrc, onClose, showNav, currentIndex, total, onPrev, onNext, showInputActions, editDisabled, onReplace, onEdit, downloading, onDownload }: LightboxInnerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const openedAtRef = useRef(Date.now())
   const editHint = useHintTooltip({ enabled: () => editDisabled })
@@ -404,6 +428,7 @@ function LightboxInner({ src, imageId, maskPreviewSrc, onClose, showNav, current
 
     const onDown = (e: MouseEvent) => {
       if (e.button !== 0) return
+      if (e.target instanceof Element && e.target.closest('button')) return
       didDragRef.current = false
       if (scaleRef.current <= 1) return
       e.preventDefault()
@@ -690,7 +715,7 @@ function LightboxInner({ src, imageId, maskPreviewSrc, onClose, showNav, current
     <div
       ref={containerRef}
       data-lightbox-root
-      className="fixed inset-0 z-[60] flex items-center justify-center select-none"
+      className="fixed inset-0 z-[60] flex items-center justify-center overflow-hidden select-none"
       style={{ cursor: isZoomed ? (isDragging ? 'grabbing' : 'grab') : 'pointer' }}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
@@ -708,7 +733,7 @@ function LightboxInner({ src, imageId, maskPreviewSrc, onClose, showNav, current
           <img
             src={src}
             data-image-id={imageId}
-            className="saveable-image max-w-[90vw] max-h-[70vh] sm:max-w-[85vw] sm:max-h-[75vh] object-contain rounded-lg shadow-2xl"
+            className="saveable-image h-auto w-auto max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] object-contain rounded-lg shadow-2xl sm:max-h-[calc(100dvh-4rem)] sm:max-w-[calc(100vw-4rem)]"
             onDragStart={(e) => e.preventDefault()}
             alt=""
           />
@@ -720,6 +745,19 @@ function LightboxInner({ src, imageId, maskPreviewSrc, onClose, showNav, current
             />
           )}
         </div>
+        <TooltipButton
+          tooltip="下载原图"
+          wrapperClassName="absolute right-2 top-2 z-20 inline-flex"
+          disabled={downloading}
+          className={`flex h-7 w-7 items-center justify-center rounded bg-black/60 text-white shadow-sm backdrop-blur-sm transition hover:bg-black/80 focus:outline-none focus:ring-2 focus:ring-white/70 ${downloading ? 'cursor-wait opacity-60' : ''}`}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation()
+            onDownload()
+          }}
+        >
+          <DownloadIcon className="h-4 w-4" />
+        </TooltipButton>
       </div>
 
       {/* 左右切换按钮 */}

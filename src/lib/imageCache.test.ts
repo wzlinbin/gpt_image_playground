@@ -14,6 +14,7 @@ import {
   cacheThumbnail,
   clearImageCaches,
   deleteImageCacheEntry,
+  ensureImageCached,
   ensureImageThumbnailCached,
   getCachedImage,
   scheduleThumbnailBackfill,
@@ -31,6 +32,17 @@ describe('imageCache', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('大图读取使用原始图片且不访问缩略图存储', async () => {
+    db.getImage.mockResolvedValue({
+      id: 'image',
+      dataUrl: 'data:image/png;base64,original',
+    })
+
+    await expect(ensureImageCached('image')).resolves.toBe('data:image/png;base64,original')
+    expect(db.getImage).toHaveBeenCalledWith('image')
+    expect(db.getStoredFreshImageThumbnail).not.toHaveBeenCalled()
   })
 
   it('evicts the least recently used images and thumbnails', async () => {
