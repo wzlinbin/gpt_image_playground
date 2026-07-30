@@ -3,6 +3,7 @@
   "name": "gpt-image-playground",
   "main": "./deploy/worker.ts",
   "compatibility_date": "2026-05-07",
+  "preview_urls": false,
   "keep_vars": true,
   "assets": {
     "directory": "./dist",

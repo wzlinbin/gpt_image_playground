@@ -1089,3 +1089,54 @@ Playwright 连续三次未完成，按规则暂停验证并回到验收设计复
 
 - 无配置、API 或数据迁移。
 - 回滚只需移除 Lightbox 下载状态、回调、按钮和对应测试；原图打开与屏幕适配功能可独立保留。
+
+## 禁用 Wrangler Preview URLs
+
+### 需求分析与编码前检查
+
+时间：2026-07-30 13:50:00 +08:00
+
+- 用户提供 Wrangler 警告：workers.dev 已启用，但 preview_urls 未写入配置，因此本次部署默认启用版本预览 URL。
+- 已查阅 .claude/context-summary-wrangler-preview-urls.md，核对当前 wrangler.jsonc、Wrangler 4.96.0 schema、CLI 警告分支和部署脚本。
+- 将使用顶层布尔字段 preview_urls: false，不关闭 workers.dev，不新增 routes 或环境配置。
+- 将遵循现有 JSONC 2 空格和双引号格式，仅修改部署配置，不触碰 Worker 运行时代码。
+- 指定专用工具未提供；使用计划工具、PowerShell、本地 Wrangler schema、Cloudflare 官方页面和本地 CLI 验证补偿。
+
+### 验收契约
+
+- wrangler.jsonc 显式包含 preview_urls: false。
+- workers.dev 正式入口保持启用默认行为。
+- Wrangler 不再因字段缺失而自动启用 Preview URLs。
+- 配置类型检查、dry-run、构建、测试和空白检查全部通过。
+
+### 编码中监控
+
+时间：2026-07-30 13:55:02 +08:00
+
+- 只在 `wrangler.jsonc` 顶层增加 `"preview_urls": false`，没有设置 `workers_dev: false`，因此正式 workers.dev 入口保持原有行为。
+- 字段位置和 JSONC 格式与 `compatibility_date`、`keep_vars` 等现有顶层配置一致。
+- 没有新增依赖、脚本、路由、环境变量或 Worker 运行时分支。
+- 本地 Wrangler schema 和 `types --check` 均确认该字段是受支持的布尔配置。
+
+### 编码后声明 - 禁用 Wrangler Preview URLs
+
+时间：2026-07-30 13:55:02 +08:00
+
+1. 复用了 Wrangler 官方配置字段 `preview_urls`，没有实现自定义部署过滤逻辑。
+2. 遵循现有 `wrangler.jsonc` 的顶层配置组织、2 空格缩进和双引号格式。
+3. 对比了当前 Wrangler 配置、Wrangler 4.96.0 本地 schema、CLI 警告分支和项目部署脚本。
+4. 已检查 routes、workers.dev 和静态资源绑定关系，确认无需关闭正式入口或修改 `ASSETS` binding。
+
+### 最终本地验证
+
+- `npx wrangler types --check`：通过，`worker-configuration.d.ts` 为最新状态。
+- `npx wrangler deploy --dry-run`：通过，读取 79 个静态文件并识别 `env.ASSETS`；原 Preview URLs 警告未再出现。
+- `npm run build`：通过，TypeScript 编译和 Vite 601 个模块构建成功；仅有既有的大包体积提示。
+- `npm test`：通过，35 个测试文件、439 个用例全部通过。
+- `git diff --check`：通过，仅有 Windows 换行转换提示。
+- 未执行真实远程部署，避免将验证过程作用于线上环境。
+
+### 迁移与回滚
+
+- 无数据、API、路由或 Worker 运行时迁移；下一次正常部署后配置生效。
+- 回滚只需删除 `wrangler.jsonc` 的 `"preview_urls": false`，Wrangler 将恢复默认启用 Preview URLs 的行为。

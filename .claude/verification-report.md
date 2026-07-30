@@ -396,6 +396,56 @@
 - `npm run build`：通过，601 个模块；仅有既有大包体积提示。
 - `git diff --check`：通过，仅有 Windows 换行转换提示。
 
+## Wrangler Preview URLs 配置验证报告
+
+生成时间：2026-07-30 13:55:02 +08:00
+
+### 1. 需求字段完整性
+
+- 目标：消除 workers.dev 已启用但 `preview_urls` 未配置的 Wrangler 部署警告。
+- 范围：仅调整 `wrangler.jsonc` 的 Preview URLs 配置，不关闭 workers.dev 正式入口，不修改路由或 Worker 逻辑。
+- 交付物：`wrangler.jsonc`、上下文摘要、操作日志和本报告。
+- 审查要点：字段是否受当前 Wrangler 支持；警告是否消失；正式入口和 `ASSETS` binding 是否保持；构建与测试是否回归通过。
+- 原始意图无遗漏或歧义：本次关闭的是每个版本的预览 URL，不是 `<名称>.<子域>.workers.dev` 正式入口。
+- 交付物映射明确：配置位于 `wrangler.jsonc`，研究记录位于 `.claude/context-summary-wrangler-preview-urls.md`，执行证据位于 `.claude/operations-log.md`。
+- 依赖与风险已评估：依赖项目现有 Wrangler 4.96.0；未新增依赖、路由或运行时 I/O。
+- 审查结论已留痕并包含时间戳。
+
+### 2. 深度审查结论
+
+- 顶层 `"preview_urls": false` 与 Wrangler 4.96.0 本地 schema 一致，配置类型检查通过。
+- 未配置 `workers_dev: false`，所以不会因修复警告而移除项目现有 workers.dev 正式访问入口。
+- dry-run 正常读取 79 个静态文件并保留 `env.ASSETS` binding，且不再输出 Preview URLs 缺省警告。
+- 改动是常量级配置解析，不增加运行时内存、网络或 CPU 开销。
+- 唯一行为变化是后续部署不再创建版本预览 URL；需要临时版本预览时应显式把该字段改为 `true`。
+- 当前环境未提供指定的 Claude Code、`sequential-thinking`、shrimp-task-manager、desktop-commander、Context7 和 GitHub 搜索工具；已使用本地 schema、CLI 源码、Wrangler 配置检查、dry-run、构建和全量测试补偿并留痕。
+
+### 3. 评分与决策
+
+| 维度 | 得分 | 说明 |
+|---|---:|---|
+| 代码质量 | 100/100 | 使用 Wrangler 原生字段，改动单一且无自定义逻辑 |
+| 测试覆盖 | 98/100 | 配置检查、dry-run、生产构建和 439 项回归测试均通过；按约束未真实部署 |
+| 规范遵循 | 97/100 | 上下文、日志、报告、回滚和本地验证齐全；指定工具缺失已记录 |
+| 需求匹配 | 100/100 | 原警告消失，Preview URLs 禁用且 workers.dev 正式入口保留 |
+| 架构一致 | 100/100 | 完全复用 Wrangler 标准配置和项目现有部署路径 |
+| 风险评估 | 99/100 | 行为边界、静态资源绑定、上线方式和回滚路径均已确认 |
+
+综合评分：99/100
+
+明确建议：通过。
+
+决策：综合评分高于 90 分且建议为“通过”，本次 Wrangler Preview URLs 配置调整确认通过。
+
+### 4. 验证证据
+
+- `npx wrangler types --check`：通过，生成类型为最新状态。
+- `npx wrangler deploy --dry-run`：通过，79 个静态文件和 `env.ASSETS` binding 正常，未出现原警告。
+- `npm run build`：通过，601 个模块构建成功；仅有既有的大包体积提示。
+- `npm test`：通过，35 个文件、439 个用例。
+- `git diff --check`：通过，仅有 Windows 换行转换提示。
+- 未执行真实远程部署；下一次正常部署后该配置生效。
+
 ## Lightbox 原图下载按钮验证报告
 
 生成时间：2026-07-30 13:43:38 +08:00
