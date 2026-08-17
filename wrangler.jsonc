@@ -1,14 +1,40 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "gpt-image-playground",
-  "main": "./deploy/worker.ts",
-  "compatibility_date": "2026-05-07",
-  "preview_urls": false,
-  "keep_vars": true,
-  "assets": {
-    "directory": "./dist",
-    "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
-    "run_worker_first": ["/runtime-config.js"]
-  }
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "gpt-image-playground",
+	"main": "./deploy/worker.ts",
+	"compatibility_date": "2026-05-07",
+	"workers_dev": false,
+	"preview_urls": false,
+	"keep_vars": true,
+	"routes": [
+		{
+			"pattern": "img.api2cn.com",
+			"custom_domain": true,
+			"enabled": true,
+			"previews_enabled": false,
+			"zone_name": "api2cn.com"
+		}
+	],
+	"assets": {
+		"directory": "./dist",
+		"binding": "ASSETS",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": [
+			"/runtime-config.js"
+		]
+	},
+	"vars": {
+		"API_CONFIG_API_PROXY": "false",
+		"API_CONFIG_BASE_URL": "https://api.api2cn.com",
+		"API_CONFIG_CODEX_CLI": "false",
+		"API_CONFIG_MODE": "images",
+		"API_CONFIG_MODEL": "gpt-image-2",
+		"API_CONFIG_NAME": "默认配置",
+		"API_CONFIG_PROVIDER": "openai",
+		"API_CONFIG_READ_ONLY": "true",
+		"API_CONFIG_RESPONSE_FORMAT_B64_JSON": "true",
+		"API_CONFIG_STREAM_IMAGES": "true",
+		"API_CONFIG_STREAM_PARTIAL_IMAGES": "1",
+		"API_CONFIG_TIMEOUT": "600"
+	}
 }

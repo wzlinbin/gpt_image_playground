@@ -1140,3 +1140,87 @@ Playwright 连续三次未完成，按规则暂停验证并回到验收设计复
 
 - 无数据、API、路由或 Worker 运行时迁移；下一次正常部署后配置生效。
 - 回滚只需删除 `wrangler.jsonc` 的 `"preview_urls": false`，Wrangler 将恢复默认启用 Preview URLs 的行为。
+
+## 允许 api2cn.com 全部子域名嵌入
+
+### 需求分析与编码前检查
+
+时间：2026-08-17 10:47:03 +08:00
+
+- 目标是将 `frame-ancestors` 从两个显式子域名调整为 `https://*.api2cn.com`。
+- 已查阅 `.claude/context-summary-frame-ancestors-wildcard.md`，核对 `public/_headers`、README 嵌入说明、Vite 公共目录构建路径和 Wrangler 静态资源入口。
+- 复用现有 `public/_headers`、Vite `public/` 复制机制和 Wrangler `dist` 静态资源绑定，不新增脚本或依赖。
+- 遵循 `_headers` 单行规则格式、README 中文说明风格和不手工编辑 `dist/` 的约定。
+- 已全仓搜索 `frame-ancestors` 和旧域名组合，确认只有配置入口与 README 说明需要同步修改。
+- 当前环境未提供 `sequential-thinking`、`shrimp-task-manager`、`desktop-commander`、Context7 和 GitHub 搜索工具；本任务使用本地精确检索、现有构建链和构建产物检查补偿。该变更不涉及第三方编程库 API 或通用算法，无需引入开源实现。
+
+### 验收契约
+
+- 同源父页面继续允许嵌入。
+- 所有 HTTPS `api2cn.com` 子域名允许嵌入。
+- 两个旧的显式子域名从 CSP 中移除。
+- README 与实际配置一致。
+- 生产构建、构建产物规则检查和空白检查全部通过。
+
+### 编码中监控
+
+时间：2026-08-17 10:52:28 +08:00
+
+- `public/_headers` 继续复用原有全路径规则、`'self'` 和移除 `X-Frame-Options` 的配置，只将两个显式子域名合并为 `https://*.api2cn.com`。
+- README 同步描述所有 HTTPS 子域名，并保留重新构建、部署后生效的约束。
+- 未新增依赖、构建脚本、运行时代码或手工生成的 `dist` 变更，配置格式与现有文件一致。
+
+### 编码后声明 - 允许 api2cn.com 全部子域名嵌入
+
+时间：2026-08-17 10:52:28 +08:00
+
+1. 复用了 `public/_headers`、Vite `public/` 复制机制和 Wrangler `dist` 静态资源绑定。
+2. 遵循 `_headers` 原有单行 CSP 格式、README 中文说明风格和构建产物不手工编辑的项目约定。
+3. 对比了 `_headers` 配置入口、README 嵌入说明、Vite 构建入口与 Wrangler 静态资源入口；差异仅为主机源通配范围。
+4. 全仓检查了 `frame-ancestors` 与两个旧显式子域名，确认没有重复配置或遗漏的对应说明。
+
+### 最终本地验证
+
+- `npm run build`：通过，TypeScript 与 Vite 601 个模块构建成功；仅有既有的大包体积提示。
+- `npm test`：通过，35 个测试文件、439 个用例全部通过。
+- `dist/_headers` 逐行检查：通过，精确包含 `'self' https://*.api2cn.com`。
+- 旧规则残留检查：通过，不再包含 `api.api2cn.com` 和 `cf.api2cn.com` 的显式 `frame-ancestors` 项。
+- `git diff --check`：通过，仅有 Windows 换行转换提示。
+- `npx wrangler deploy --dry-run`：通过，读取 `dist` 中 79 个静态文件并识别 `env.ASSETS`，未执行远程部署。
+- 第一次产物精确检查因脚本错误地固定使用 CRLF 而失败；改为逐行比较后通过。失败原因、补偿方式和复验结果已留痕。
+
+### 迁移与回滚
+
+- 无数据或 API 迁移；重新构建并部署后生效。
+- 回滚时恢复 `public/_headers` 中两个显式子域名，并同步恢复 README 说明，然后重新构建和部署。
+
+## 对齐 Wrangler 远程部署配置
+
+时间：2026-08-17 10:58:23 +08:00
+
+### 需求分析与编码前检查
+
+- 用户的真实部署提示显示本地配置将删除 `img.api2cn.com` 自定义域、开启 `workers.dev` 并覆盖 Dashboard 变量。
+- 已查阅 Wrangler 技能说明、本地 4.96.0 schema、部署命令帮助、`wrangler.jsonc`、README 部署约定和 Worker 变量读取实现。
+- 将复用 Wrangler 原生 `workers_dev`、`routes` 和 `keep_vars` 字段，不新增脚本或硬编码 Dashboard 变量。
+- 当前环境未提供仓库指定的 `sequential-thinking`、`shrimp-task-manager`、`desktop-commander` 和 Context7；使用 Wrangler 本地 schema、CLI 帮助、类型检查与 dry-run 补偿。
+
+### 实施与复用声明
+
+- 新增 `workers_dev: false`，与远程状态一致。
+- 新增 `img.api2cn.com` 自定义域路由，显式设置 `enabled: true` 和 `previews_enabled: false`。
+- 保留 `preview_urls: false`、`keep_vars: true`、静态资源目录与 Worker 入口，未改变运行时代码。
+- 命名、缩进和字段格式与现有 JSONC 配置一致。
+
+### 本地验证
+
+- `npx wrangler types --check`：通过，`worker-configuration.d.ts` 最新。
+- `npx wrangler deploy --dry-run --keep-vars`：通过，读取 79 个静态文件并识别 `env.ASSETS`。
+- Wrangler 4.96.0 schema：确认全部新增字段合法。
+- `git diff --check`：通过，仅有 Windows 换行转换提示。
+- 未执行真实远程部署；下次部署应显式使用 `--keep-vars`。
+
+### 迁移与回滚
+
+- 无数据迁移；本地部署配置现在以 `img.api2cn.com` 为正式自定义域，并关闭 `workers.dev`。
+- 回滚可移除 `workers_dev` 与 `routes`，但会恢复本地和远程配置不一致的部署警告。

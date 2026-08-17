@@ -251,7 +251,7 @@ npm run deploy:cf
 
 API Key 不属于 Worker 配置，继续由用户在浏览器本地填写和保存。只读开启后，旧持久化数据、导入配置和页面 URL 参数均不能覆盖 Worker 配置；仅 API Key 可以保留和编辑，未启用首次 API Key 必填提示时也可通过 `?apiKey=` 提供。
 
-**允许指定系统嵌入**：`public/_headers` 通过 CSP `frame-ancestors` 控制 Cloudflare 静态站点的 iframe 父页面。默认允许同源、`https://api.api2cn.com` 和 `https://cf.api2cn.com`，修改后需重新构建并部署。
+**允许指定系统嵌入**：`public/_headers` 通过 CSP `frame-ancestors` 控制 Cloudflare 静态站点的 iframe 父页面。默认允许同源和 `https://*.api2cn.com` 下的所有 HTTPS 子域名，修改后需重新构建并部署。
 
 **携带默认配置参数**：`VITE_DEFAULT_API_URL` 支持通过 URL 查询参数预设默认配置，可用参数参考下方的：“URL 传参快速填充”：`apiUrl`、`apiKey`、`apiMode`、`model`、`profileName`、`reasoningEffort`、`codexCli`、`streamImages`、`streamPartialImages`。
 
