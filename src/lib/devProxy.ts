@@ -9,6 +9,30 @@ export interface DevProxyConfig {
 }
 
 const DEFAULT_PROXY_PREFIX = '/api-proxy'
+const HTTP_PROXY_PATH = '/http-proxy'
+
+function isHttpProxyAvailable(): boolean {
+  const config = typeof __GPT_IMAGE_PLAYGROUND_WORKER_CONFIG__ === 'undefined'
+    ? null
+    : __GPT_IMAGE_PLAYGROUND_WORKER_CONFIG__
+  return Boolean(
+    config &&
+    typeof config === 'object' &&
+    !Array.isArray(config) &&
+    (config as Record<string, unknown>).httpProxyAvailable === true,
+  )
+}
+
+export function buildBrowserFetchUrl(url: string): string {
+  if (!isHttpProxyAvailable()) return url
+
+  try {
+    if (new URL(url).protocol !== 'http:') return url
+    return `${HTTP_PROXY_PATH}?url=${encodeURIComponent(url)}`
+  } catch {
+    return url
+  }
+}
 
 export function normalizeBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim()
@@ -71,7 +95,8 @@ export function buildApiUrl(
     ? endpointPath
     : ['v1', endpointPath].join('/')
 
-  return normalizedBaseUrl ? `${normalizedBaseUrl}/${apiPath}` : `/${apiPath}`
+  const url = normalizedBaseUrl ? `${normalizedBaseUrl}/${apiPath}` : `/${apiPath}`
+  return buildBrowserFetchUrl(url)
 }
 
 export function resolveDevProxyConfig(input: unknown, isDev: boolean): DevProxyConfig | null {

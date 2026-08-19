@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest'
-import { buildApiUrl } from './devProxy'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { buildApiUrl, buildBrowserFetchUrl } from './devProxy'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('buildApiUrl', () => {
   it('uses the same-origin proxy prefix when API proxy is enabled', () => {
@@ -35,5 +39,22 @@ describe('buildApiUrl', () => {
     expect(buildApiUrl('http://api.example.com/v1', 'responses', null, false)).toBe(
       'http://api.example.com/v1/responses',
     )
+  })
+
+  it('uses the Worker proxy for HTTP URLs', () => {
+    vi.stubGlobal('__GPT_IMAGE_PLAYGROUND_WORKER_CONFIG__', { httpProxyAvailable: true })
+
+    expect(buildApiUrl('http://api.example.com:8180', 'images/generations', null, false)).toBe(
+      '/http-proxy?url=http%3A%2F%2Fapi.example.com%3A8180%2Fv1%2Fimages%2Fgenerations',
+    )
+    expect(buildBrowserFetchUrl('http://cdn.example.com/image.png?token=abc')).toBe(
+      '/http-proxy?url=http%3A%2F%2Fcdn.example.com%2Fimage.png%3Ftoken%3Dabc',
+    )
+  })
+
+  it('does not rewrite HTTP URLs when the Worker proxy is unavailable', () => {
+    vi.stubGlobal('__GPT_IMAGE_PLAYGROUND_WORKER_CONFIG__', {})
+
+    expect(buildBrowserFetchUrl('http://api.example.com/v1')).toBe('http://api.example.com/v1')
   })
 })
