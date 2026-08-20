@@ -1,5 +1,6 @@
 import type { AppSettings, ResponsesOutputItem, TaskParams } from '../types'
 import { blobToDataUrl } from './dataUrl'
+import { buildBrowserFetchUrl } from './devProxy'
 
 export const MIME_MAP: Record<string, string> = {
   png: 'image/png',
@@ -146,15 +147,16 @@ async function probeNoCorsReachability(url: string, timeoutMs = 8000): Promise<'
 export async function fetchImageUrlAsDataUrl(url: string, fallbackMime: string, signal?: AbortSignal): Promise<string> {
   if (isDataUrl(url)) return url
 
+  const fetchUrl = buildBrowserFetchUrl(url)
   let response: Response
   try {
-    response = await fetch(url, {
+    response = await fetch(fetchUrl, {
       cache: 'no-store',
       signal,
     })
   } catch (err) {
     if (err instanceof TypeError) {
-      const probe = await probeNoCorsReachability(url)
+      const probe = await probeNoCorsReachability(fetchUrl)
       if (probe === 'opaque') {
         throw new Error(`图片已生成，但因服务商未允许跨域，图片链接下载失败。${IMAGE_FETCH_CORS_HINT}`)
       }

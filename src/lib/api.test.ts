@@ -226,7 +226,7 @@ describe('callImageApi', () => {
     }])
   })
 
-  it('streams Images API partial images and resolves the final completed image', async () => {
+  it('parses Images API SSE responses without forcing stream request parameters', async () => {
     const streamBody = [
       'data: {"type":"image_generation.partial_image","partial_image_index":0,"b64_json":"cGFydGlhbA=="}',
       '',
@@ -262,10 +262,8 @@ describe('callImageApi', () => {
 
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse(String((init as RequestInit).body))
-    expect(body).toMatchObject({
-      stream: true,
-      partial_images: 3,
-    })
+    expect(body.stream).toBeUndefined()
+    expect(body.partial_images).toBeUndefined()
     expect(partialImages).toEqual(['data:image/png;base64,cGFydGlhbA=='])
     expect(result).toMatchObject({
       images: ['data:image/png;base64,ZmluYWw='],
@@ -282,7 +280,7 @@ describe('callImageApi', () => {
     })
   })
 
-  it('suggests disabling streaming when a streaming request fails', async () => {
+  it('does not blame the streaming toggle for Images API request errors', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('invalid character \':\' looking for beginning of value', {
       status: 400,
       headers: { 'Content-Type': 'text/plain' },
@@ -302,7 +300,47 @@ describe('callImageApi', () => {
       prompt: 'prompt',
       params: { ...DEFAULT_PARAMS },
       inputImageDataUrls: [],
-    } as any)).rejects.toThrow('invalid character \':\' looking for beginning of value\n提示：当前使用的 API 可能不支持流式传输，请尝试关闭「流式传输」功能。')
+    } as any)).rejects.toThrow('invalid character \':\' looking for beginning of value')
+  })
+
+  it('uses one standard Images API request for a synchronous upstream when streaming is enabled', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      data: [{ b64_json: 'aW1hZ2U=' }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+
+    const result = await callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        streamImages: true,
+        profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({
+          ...profile,
+          apiKey: 'test-key',
+          responseFormatB64Json: true,
+          streamImages: true,
+        })),
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+    } as any)
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body))
+    expect(body).toMatchObject({
+      model: DEFAULT_SETTINGS.model,
+      prompt: 'prompt',
+      size: DEFAULT_PARAMS.size,
+      quality: DEFAULT_PARAMS.quality,
+      response_format: 'b64_json',
+      n: 1,
+    })
+    expect(body.stream).toBeUndefined()
+    expect(body.partial_images).toBeUndefined()
+    expect(result.images).toEqual(['data:image/png;base64,aW1hZ2U='])
   })
 
   it('preserves malformed stream event text when suggesting disabling streaming', async () => {
@@ -666,7 +704,7 @@ describe('callImageApi', () => {
     } as any)).rejects.toThrow('流式接口未返回最终图片数据')
   })
 
-  it('splits Images API streaming into concurrent single-image requests when n is greater than 1', async () => {
+  it('passes multi-image Images API requests through to the endpoint', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       const streamBody = [
         'data: {"type":"image_generation.partial_image","partial_image_index":0,"b64_json":"cGFydGlhbA=="}',
@@ -702,23 +740,15 @@ describe('callImageApi', () => {
       onPartialImage: (partial: { image: string; requestIndex?: number }) => partials.push(partial),
     } as any)
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    for (const [, init] of fetchMock.mock.calls) {
-      const body = JSON.parse(String((init as RequestInit).body))
-      expect(body.n).toBeUndefined()
-      expect(body.stream).toBe(true)
-      expect(body.partial_images).toBe(1)
-    }
-    expect(result.images).toHaveLength(2)
-    expect(result.images).toEqual([
-      'data:image/png;base64,ZmluYWw=',
-      'data:image/png;base64,ZmluYWw=',
-    ])
-    expect(partials.map((partial) => partial.requestIndex).sort()).toEqual([0, 1])
-    expect(partials.map((partial) => partial.image)).toEqual([
-      'data:image/png;base64,cGFydGlhbA==',
-      'data:image/png;base64,cGFydGlhbA==',
-    ])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body))
+    expect(body.n).toBe(2)
+    expect(body.stream).toBeUndefined()
+    expect(body.partial_images).toBeUndefined()
+    expect(result.images).toHaveLength(1)
+    expect(result.images).toEqual(['data:image/png;base64,ZmluYWw='])
+    expect(partials.map((partial) => partial.requestIndex)).toEqual([undefined])
+    expect(partials.map((partial) => partial.image)).toEqual(['data:image/png;base64,cGFydGlhbA=='])
   })
 
   it('keeps successful Images API concurrent results when one request fails', async () => {

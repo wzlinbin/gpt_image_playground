@@ -520,7 +520,7 @@ export async function callOpenAICompatibleImageApi(opts: CallApiOptions, profile
 
 async function callImagesApi(opts: CallApiOptions, profile: ApiProfile): Promise<CallApiResult> {
   const n = opts.params.n > 0 ? opts.params.n : 1
-  if ((profile.codexCli || (profile.streamImages && n > 1)) && n > 1) {
+  if (profile.codexCli && n > 1) {
     return callImagesApiConcurrent(opts, profile, n)
   }
 
@@ -619,15 +619,9 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
       if (params.output_format !== 'png' && params.output_compression != null) {
         formData.append('output_compression', String(params.output_compression))
       }
-      if (params.n > 1) {
-        formData.append('n', String(params.n))
-      }
+      formData.append('n', String(params.n))
       if (profile.responseFormatB64Json) {
         formData.append('response_format', 'b64_json')
-      }
-      if (profile.streamImages) {
-        formData.append('stream', 'true')
-        formData.append('partial_images', String(getStreamPartialImages(profile)))
       }
 
       const imageBlobs: Blob[] = []
@@ -684,15 +678,9 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
       if (params.output_format !== 'png' && params.output_compression != null) {
         body.output_compression = params.output_compression
       }
-      if (params.n > 1) {
-        body.n = params.n
-      }
+      body.n = params.n
       if (profile.responseFormatB64Json) {
         body.response_format = 'b64_json'
-      }
-      if (profile.streamImages) {
-        body.stream = true
-        body.partial_images = getStreamPartialImages(profile)
       }
 
       response = await fetch(buildApiUrl(profile.baseUrl, paths.generationPath, proxyConfig, useApiProxy), {
@@ -709,10 +697,10 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
 
     if (!response.ok) {
       const errorMessage = await getApiErrorMessage(response)
-      throw new Error(maybeAppendStreamingHint(errorMessage, response.status, profile.streamImages))
+      throw new Error(errorMessage)
     }
 
-    if (profile.streamImages && isEventStreamResponse(response)) {
+    if (isEventStreamResponse(response)) {
       return parseImagesApiStreamResponse(response, mime, opts.onPartialImage)
     }
 

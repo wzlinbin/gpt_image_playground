@@ -1572,7 +1572,7 @@ export default function SettingsModal() {
                       </button>
                     </div>
                     <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-                      开启后请求以流式传输，并非所有服务商和网关都支持此功能。官方接口在流式模式下不发送心跳，需要配合请求中间步骤图像来维持连接，避免超时断开。官方接口仅支持单图流式传输，因此数量大于 1 时会将多图生成拆分为并发单图。
+                      Images API 始终发送标准兼容请求，由端点自行选择同步或流式上游；响应会根据实际 Content-Type 自动解析。Responses API 才会使用流式传输和中间步骤图像。
                     </div>
                   </div>
                   <div className={`block ${activeProfile.streamImages ? '' : 'opacity-60'}`}>

@@ -1,6 +1,7 @@
 /// <reference path="../worker-configuration.d.ts" />
 
 const RUNTIME_CONFIG_PATH = '/runtime-config.js'
+const HTTP_PROXY_PATH = '/http-proxy'
 const RUNTIME_CONFIG_GLOBAL = '__GPT_IMAGE_PLAYGROUND_WORKER_CONFIG__'
 
 interface DashboardEnv extends Env {
@@ -39,12 +40,76 @@ export function readDashboardApiConfig(env: DashboardEnv) {
 }
 
 export function serializeRuntimeConfig(apiConfigReadOnly: unknown, apiConfig: unknown) {
-  return `globalThis.${RUNTIME_CONFIG_GLOBAL}=${JSON.stringify({ apiConfigReadOnly, apiConfig })}\n`
+  return `globalThis.${RUNTIME_CONFIG_GLOBAL}=${JSON.stringify({ apiConfigReadOnly, apiConfig, httpProxyAvailable: true })}\n`
+}
+
+export async function proxyHttpRequest(request: Request) {
+  if (request.method !== 'GET' && request.method !== 'HEAD' && request.method !== 'POST') {
+    return new Response('仅支持 GET、HEAD 和 POST 请求', {
+      status: 405,
+      headers: { Allow: 'GET, HEAD, POST' },
+    })
+  }
+
+  const requestUrl = new URL(request.url)
+  const rawTarget = requestUrl.searchParams.get('url')
+  if (!rawTarget) return new Response('缺少 HTTP 目标地址', { status: 400 })
+
+  let target: URL
+  try {
+    target = new URL(rawTarget)
+  } catch {
+    return new Response('HTTP 目标地址无效', { status: 400 })
+  }
+
+  if (target.protocol !== 'http:') return new Response('仅支持 HTTP 目标地址', { status: 400 })
+  if (target.username || target.password) return new Response('HTTP 目标地址不能包含凭据', { status: 400 })
+  if (target.hostname === requestUrl.hostname) return new Response('HTTP 目标地址不能指向当前站点', { status: 400 })
+
+  const origin = request.headers.get('Origin')
+  if (origin && origin !== requestUrl.origin) return new Response('禁止跨站使用 HTTP 代理', { status: 403 })
+  const fetchSite = request.headers.get('Sec-Fetch-Site')
+  if (fetchSite && fetchSite !== 'same-origin') return new Response('禁止跨站使用 HTTP 代理', { status: 403 })
+
+  const headers = new Headers(request.headers)
+  for (const name of [
+    'Connection',
+    'Content-Length',
+    'Host',
+    'Origin',
+    'Referer',
+    'Sec-Fetch-Dest',
+    'Sec-Fetch-Mode',
+    'Sec-Fetch-Site',
+    'Sec-Fetch-User',
+  ]) {
+    headers.delete(name)
+  }
+
+  try {
+    const response = await fetch(target, {
+      method: request.method,
+      headers,
+      body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
+      redirect: 'follow',
+    })
+    const responseHeaders = new Headers(response.headers)
+    responseHeaders.delete('Set-Cookie')
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders,
+    })
+  } catch (err) {
+    console.error('HTTP 代理请求失败', err)
+    return new Response('HTTP 上游服务不可达', { status: 502 })
+  }
 }
 
 export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url)
+    if (url.pathname === HTTP_PROXY_PATH) return proxyHttpRequest(request)
     if (url.pathname !== RUNTIME_CONFIG_PATH) return env.ASSETS.fetch(request)
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       return new Response('仅支持 GET 和 HEAD 请求', {

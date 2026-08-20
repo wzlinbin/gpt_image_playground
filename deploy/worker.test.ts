@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import worker, { readDashboardApiConfig, serializeRuntimeConfig } from './worker'
+import worker, { proxyHttpRequest, readDashboardApiConfig, serializeRuntimeConfig } from './worker'
 
 describe('serializeRuntimeConfig', () => {
   it('生成可同步执行的运行时配置脚本且不包含 API Key', () => {
@@ -9,7 +9,7 @@ describe('serializeRuntimeConfig', () => {
       model: 'worker-model',
     })
 
-    expect(script).toBe('globalThis.__GPT_IMAGE_PLAYGROUND_WORKER_CONFIG__={"apiConfigReadOnly":"true","apiConfig":{"provider":"openai","model":"worker-model"}}\n')
+    expect(script).toBe('globalThis.__GPT_IMAGE_PLAYGROUND_WORKER_CONFIG__={"apiConfigReadOnly":"true","apiConfig":{"provider":"openai","model":"worker-model"},"httpProxyAvailable":true}\n')
     expect(script).not.toContain('apiKey')
   })
 
@@ -80,5 +80,54 @@ describe('serializeRuntimeConfig', () => {
     expect(await rejected.text()).toBe('仅支持 GET 和 HEAD 请求')
     expect(await asset.text()).toBe('静态资源')
     expect(assetsFetch).toHaveBeenCalledOnce()
+  })
+})
+
+describe('proxyHttpRequest', () => {
+  it('转发同源页面发起的 HTTP POST 请求并保留上游响应', async () => {
+    const upstreamFetch = vi.fn().mockResolvedValue(new Response('{"ok":true}', {
+      status: 201,
+      headers: {
+        'Content-Type': 'application/json',
+        'Set-Cookie': 'secret=value',
+      },
+    }))
+    vi.stubGlobal('fetch', upstreamFetch)
+
+    const response = await proxyHttpRequest(new Request(
+      'https://playground.example.com/http-proxy?url=http%3A%2F%2Fimage.example.com%3A8180%2Fv1%2Fimages%2Fgenerations',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer test-key',
+          'Content-Type': 'application/json',
+          Origin: 'https://playground.example.com',
+          'Sec-Fetch-Site': 'same-origin',
+        },
+        body: '{"prompt":"test"}',
+      },
+    ))
+
+    expect(response.status).toBe(201)
+    expect(await response.text()).toBe('{"ok":true}')
+    expect(response.headers.has('Set-Cookie')).toBe(false)
+    expect(upstreamFetch).toHaveBeenCalledOnce()
+    const [target, init] = upstreamFetch.mock.calls[0]
+    expect(String(target)).toBe('http://image.example.com:8180/v1/images/generations')
+    expect(init.method).toBe('POST')
+    expect(init.headers.get('Authorization')).toBe('Bearer test-key')
+    expect(init.headers.has('Origin')).toBe(false)
+  })
+
+  it('拒绝非 HTTP、跨站和回环目标', async () => {
+    const httpsTarget = await proxyHttpRequest(new Request('https://playground.example.com/http-proxy?url=https%3A%2F%2Fapi.example.com'))
+    const crossSite = await proxyHttpRequest(new Request('https://playground.example.com/http-proxy?url=http%3A%2F%2Fapi.example.com', {
+      headers: { Origin: 'https://other.example.com' },
+    }))
+    const loop = await proxyHttpRequest(new Request('https://playground.example.com/http-proxy?url=http%3A%2F%2Fplayground.example.com%2Fhttp-proxy'))
+
+    expect(httpsTarget.status).toBe(400)
+    expect(crossSite.status).toBe(403)
+    expect(loop.status).toBe(400)
   })
 })
